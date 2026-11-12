@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Nicht in Suchmaschinen. Geschützt ist die Seite durch Anmeldung und Token, nicht durch Geheimhaltung. -->
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Flohmi Admin</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <header class="kopf">
+    <h1>Flohmi Admin</h1>
+    <button id="abmelden" class="knopf knopf-leise" type="button" hidden>Abmelden</button>
+  </header>
+
+  <main>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <!-- 1. Anmelden mit dem Flohmi-Konto (E-Mail-Code), wie in der App -->
+    <section id="anmeldung" class="karte" aria-labelledby="anmeldung-titel">
+      <h2 id="anmeldung-titel">Anmelden</h2>
+      <p>Mit dem Flohmi-Konto einer Admin. Du bekommst einen Code per E-Mail.</p>
+      <form id="email-formular" novalidate>
+        <label for="email">E-Mail-Adresse</label>
+        <input id="email" name="email" type="email" autocomplete="email" required>
+        <button class="knopf" type="submit">Code schicken</button>
+      </form>
+      <form id="code-formular" novalidate hidden>
+        <label for="code">Code aus der E-Mail</label>
+        <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" required>
+        <button class="knopf" type="submit">Anmelden</button>
+      </form>
+    </section>
+
+    <section id="kein-admin" class="karte" hidden>
+      <h2>Kein Zugang</h2>
+      <p>Dieses Konto ist nicht als Admin eingetragen. Admins trägt man im SQL Editor von
+        Supabase ein (siehe doku/ANLEITUNG-ADMIN.md).</p>
+    </section>
+
+    <!-- 2. Alles Weitere nur für Admins -->
+    <div id="verwaltung" hidden>
+      <section class="karte" aria-labelledby="meldungen-titel">
+        <div class="zeile">
+          <h2 id="meldungen-titel">Offene Meldungen</h2>
+          <button id="meldungen-laden" class="knopf knopf-leise" type="button">Neu laden</button>
+        </div>
+        <p class="hinweis">Freigegebene Meldungen erscheinen in der App nach dem nächsten Lauf von
+          „Märkte sammeln“ (alle 3 Stunden oder unten von Hand starten).</p>
+        <div id="meldungen-liste"></div>
+      </section>
+
+      <section class="karte" aria-labelledby="github-titel">
+        <h2 id="github-titel">GitHub</h2>
+        <form id="token-formular" novalidate>
+          <p>Für Workflows und Merges brauchst du ein GitHub-Token. Es bleibt nur in diesem
+            Browser-Tab und ist beim Schließen weg.</p>
+          <label for="token">GitHub-Token</label>
+          <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+          <button class="knopf" type="submit">Verbinden</button>
+        </form>
+        <div id="github-bereich" hidden>
+          <div class="zeile">
+            <p id="github-nutzer" class="hinweis"></p>
+            <button id="token-vergessen" class="knopf knopf-leise" type="button">Token vergessen</button>
+          </div>
+
+          <h3>Workflows starten</h3>
+          <div id="workflow-liste"></div>
+
+          <div class="zeile">
+            <h3>Pull Requests nach develop</h3>
+            <button id="prs-laden" class="knopf knopf-leise" type="button">Neu laden</button>
+          </div>
+          <div id="pr-liste"></div>
+
+          <h3>develop nach main</h3>
+          <div id="main-bereich"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="konfiguration.js"></script>
+  <script src="admin-regeln.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>
