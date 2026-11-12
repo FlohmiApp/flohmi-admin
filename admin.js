@@ -1,11 +1,15 @@
 // Admin-Seite (Ticket #43): Meldungen freigeben, Workflows starten, Pull Requests mergen.
-// Logik in admin-regeln.js, Anleitung in doku/ANLEITUNG-ADMIN.md.
+// Menü nach Aufgaben (Ticket #111). Logik in admin-regeln.js, Anleitung in doku/ANLEITUNG-ADMIN.md.
 //
 // Schutz: Die Seite selbst ist öffentlich, ihr Code enthält keine Geheimnisse.
 // - Meldungen lesen und freigeben erlaubt Supabase nur Konten aus der Tabelle „admins“
 //   (Regeln in supabase/migrations/20261112170000_admins.sql).
 // - Für GitHub braucht es ein Token, das die Admin selbst eingibt (nur im Browser-Tab).
 // Texte aus Meldungen kommen von fremden Personen und werden nur als Text eingesetzt (nie als HTML).
+//
+// Navigation: Jeder Bereich hat eine Adresse (#meldungen, #prs, #workflow:sammeln.yml …).
+// So funktioniert die Zurück-Taste. Am Handy zeigt die Seite ohne Adresse das Menü, am PC
+// stehen Menü und Bereich nebeneinander (dann ohne Adresse der Startbereich).
 
 const client = supabase.createClient(SUPABASE_URL, SUPABASE_SCHLUESSEL, {
   auth: { storageKey: "flohmi-admin-anmeldung", persistSession: true, detectSessionInUrl: false }
@@ -14,6 +18,10 @@ const client = supabase.createClient(SUPABASE_URL, SUPABASE_SCHLUESSEL, {
 const $ = (id) => document.getElementById(id);
 let anmeldeEmail = "";
 let githubToken = "";
+let githubVerbunden = false;
+let istAdminAngemeldet = false;
+// Bereich, zu dem es nach dem Verbinden mit GitHub weitergehen soll.
+let nachDemVerbinden = null;
 
 // --- Kleine Helfer -----------------------------------------------------------------------
 
@@ -38,6 +46,92 @@ async function beschaeftigt(knopf, arbeit) {
   knopf.disabled = true;
   try { return await arbeit(); } finally { knopf.disabled = false; }
 }
+
+// --- Menü und Bereiche (Ticket #111) -------------------------------------------------------
+
+function menueZeichnen() {
+  $("menue").replaceChildren(...adminMenue().map(function (gruppe) {
+    const ueberschrift = "menue-" + gruppe.id;
+    return element("section", { klasse: "menue-gruppe", "aria-labelledby": ueberschrift },
+      element("h2", { id: ueberschrift },
+        element("span", { klasse: "symbol", "aria-hidden": "true", text: gruppe.symbol }), gruppe.titel),
+      element("ul", {}, ...gruppe.eintraege.map(function (eintrag) {
+        const inhalt = [
+          element("span", { klasse: "symbol", "aria-hidden": "true", text: eintrag.symbol }),
+          element("span", { klasse: "titel", text: eintrag.titel }),
+          element("span", { klasse: "zaehler", hidden: true })
+        ];
+        if (eintrag.aktion === "abmelden") {
+          return element("li", {}, element("button", { klasse: "menue-eintrag", type: "button",
+            "data-aktion": "abmelden", onclick: abmelden }, ...inhalt));
+        }
+        return element("li", {}, element("a", { klasse: "menue-eintrag", href: "#" + eintrag.bereich,
+          "data-bereich": eintrag.bereich }, ...inhalt));
+      })));
+  }));
+}
+
+// Zahl hinter einem Menüeintrag (offene Meldungen, Pull Requests …). null blendet sie aus.
+function zaehlerSetzen(bereich, anzahl) {
+  const zaehler = document.querySelector(`.menue-eintrag[data-bereich="${bereich}"] .zaehler`);
+  if (!zaehler) return;
+  zaehler.hidden = !anzahl;
+  zaehler.textContent = anzahl ? String(anzahl) : "";
+}
+
+// Zeigt den Bereich aus der Adresse. Ohne gültige Adresse: am Handy das Menü, am PC den Start.
+function bereichZeigen() {
+  if (!istAdminAngemeldet) return;
+  let eintrag = bereichAusAdresse(location.hash);
+  const amHandy = window.matchMedia("(max-width: 899px)").matches;
+  $("verwaltung").classList.toggle("zeigt-menue", !eintrag);
+  if (!eintrag) {
+    if (amHandy) {
+      for (const bereich of document.querySelectorAll(".bereich")) bereich.hidden = true;
+      menueMarkieren(null);
+      return;
+    }
+    eintrag = bereichAusAdresse("#" + START_BEREICH);
+  }
+
+  // Ohne GitHub-Verbindung geht es erst zur Verbindung, danach weiter zum gewünschten Bereich.
+  let ziel = eintrag;
+  $("github-hinweis").hidden = true;
+  if (eintrag.github && !githubVerbunden) {
+    nachDemVerbinden = eintrag.bereich;
+    $("github-hinweis").textContent = "Für „" + eintrag.titel + "“ brauchst du zuerst die GitHub-Verbindung.";
+    $("github-hinweis").hidden = false;
+    ziel = bereichAusAdresse("#github");
+  }
+
+  const sichtbar = ziel.workflow ? "workflow" : ziel.bereich;
+  for (const bereich of document.querySelectorAll(".bereich")) {
+    bereich.hidden = bereich.dataset.bereich !== sichtbar;
+  }
+  if (ziel.workflow) {
+    $("workflow-titel").textContent = ziel.symbol + " " + ziel.titel;
+    for (const karte of document.querySelectorAll("#workflow-liste [data-workflow]")) {
+      karte.hidden = karte.dataset.workflow !== ziel.workflow;
+    }
+  }
+  menueMarkieren(eintrag.bereich);
+  document.title = eintrag.titel + " – Flohmi Admin";
+}
+
+function menueMarkieren(bereich) {
+  for (const link of document.querySelectorAll(".menue-eintrag[data-bereich]")) {
+    if (link.dataset.bereich === bereich) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+}
+
+window.addEventListener("hashchange", function () {
+  statusZeigen("");
+  bereichZeigen();
+  // Am Handy nach oben, damit der neue Bereich (oder das Menü) sichtbar ist.
+  window.scrollTo(0, 0);
+});
+window.matchMedia("(max-width: 899px)").addEventListener("change", bereichZeigen);
 
 // --- Anmeldung (Supabase) ----------------------------------------------------------------
 
@@ -67,16 +161,18 @@ $("code-formular").addEventListener("submit", async function (ereignis) {
   });
 });
 
-$("abmelden").addEventListener("click", async function () {
+async function abmelden() {
   await client.auth.signOut();
   tokenVergessen();
+  history.replaceState(null, "", location.pathname + location.search);
   statusZeigen("Abgemeldet.");
-});
+}
+$("kein-admin-abmelden").addEventListener("click", abmelden);
 
 async function anmeldungAnzeigen(sitzung) {
   const angemeldet = Boolean(sitzung);
+  istAdminAngemeldet = false;
   $("anmeldung").hidden = angemeldet;
-  $("abmelden").hidden = !angemeldet;
   $("kein-admin").hidden = true;
   $("verwaltung").hidden = true;
   if (!angemeldet) {
@@ -89,7 +185,10 @@ async function anmeldungAnzeigen(sitzung) {
     $("kein-admin").hidden = false;
     return;
   }
+  istAdminAngemeldet = true;
   $("verwaltung").hidden = false;
+  menueZeichnen();
+  bereichZeigen();
   meldungenLaden();
   tokenAusSpeicher();
 }
@@ -110,6 +209,7 @@ async function meldungenLaden() {
     liste.replaceChildren(element("p", { klasse: "warnung", text: "Meldungen konnten nicht geladen werden: " + error.message }));
     return;
   }
+  zaehlerSetzen("meldungen", data.length);
   if (data.length === 0) {
     liste.replaceChildren(element("p", { klasse: "hinweis", text: "Keine offenen Meldungen." }));
     return;
@@ -124,7 +224,7 @@ function meldungAnzeigen(meldung) {
   }
   const grund = freigabePruefen(meldung);
   const eintrag = element("article", { klasse: "eintrag", "data-id": String(meldung.id) },
-    element("h4", { text: meldung.name + " (" + meldung.ort + ")" }),
+    element("h3", { text: meldung.name + " (" + meldung.ort + ")" }),
     daten,
     grund ? element("p", { klasse: "warnung", text: "Nicht freigeben: " + grund }) : null,
     element("div", { klasse: "knoepfe" },
@@ -146,7 +246,9 @@ async function statusSetzen(meldung, status, knopf, eintrag) {
     if (!data || data.length === 0) return statusZeigen("Die Meldung war nicht mehr offen. Liste neu laden.", true);
     eintrag.remove();
     statusZeigen("„" + meldung.name + "“ " + (status === "freigegeben" ? "freigegeben." : "abgelehnt."));
-    if ($("meldungen-liste").children.length === 0) meldungenLaden();
+    const uebrig = $("meldungen-liste").children.length;
+    zaehlerSetzen("meldungen", uebrig);
+    if (uebrig === 0) meldungenLaden();
   });
 }
 
@@ -186,9 +288,11 @@ function tokenAusSpeicher() {
 
 function tokenVergessen() {
   githubToken = "";
+  githubVerbunden = false;
   try { sessionStorage.removeItem(TOKEN_SPEICHER); } catch (fehler) { /* egal */ }
   $("github-bereich").hidden = true;
   $("token-formular").hidden = false;
+  for (const bereich of ["prs", "main"]) zaehlerSetzen(bereich, null);
 }
 
 $("token-formular").addEventListener("submit", async function (ereignis) {
@@ -210,25 +314,34 @@ async function githubVerbinden() {
       throw new Error("Das Konto " + nutzer.login + " darf in " + ADMIN_REPO + " nicht schreiben.");
     }
     try { sessionStorage.setItem(TOKEN_SPEICHER, githubToken); } catch (fehler) { /* dann nur bis zum Neuladen */ }
+    githubVerbunden = true;
     $("github-nutzer").textContent = "Verbunden als " + nutzer.login + " mit " + ADMIN_REPO + ".";
     $("token-formular").hidden = true;
     $("github-bereich").hidden = false;
+    $("github-hinweis").hidden = true;
     statusZeigen("");
     workflowsAnzeigen();
     prsLaden();
     mainBereichLaden();
+    // Wollte die Admin eigentlich woanders hin, geht es jetzt dorthin.
+    if (nachDemVerbinden) {
+      const ziel = nachDemVerbinden;
+      nachDemVerbinden = null;
+      if (location.hash === "#" + ziel) bereichZeigen(); else location.hash = ziel;
+    } else {
+      bereichZeigen();
+    }
   } catch (fehler) {
     tokenVergessen();
     statusZeigen(fehler.message, true);
   }
 }
 
-// Workflows
+// Workflows: je Workflow eine Karte; sichtbar ist immer nur die aus dem Menü gewählte.
 function workflowsAnzeigen() {
   $("workflow-liste").replaceChildren(...STARTBARE_WORKFLOWS.map(function (workflow) {
     const stand = element("p", { klasse: "hinweis", text: "Letzter Lauf: …" });
-    const eintrag = element("div", { klasse: "eintrag", "data-workflow": workflow.datei },
-      element("h4", { text: workflow.titel }),
+    const eintrag = element("div", { klasse: "eintrag", "data-workflow": workflow.datei, hidden: true },
       element("p", { text: workflow.text }),
       stand,
       element("div", { klasse: "knoepfe" },
@@ -267,6 +380,7 @@ async function prsLaden() {
   liste.replaceChildren(element("p", { klasse: "hinweis", text: "Lädt …" }));
   try {
     const offene = await github("offenePrs", { basis: "develop" });
+    zaehlerSetzen("prs", offene.length);
     if (offene.length === 0) {
       liste.replaceChildren(element("p", { klasse: "hinweis", text: "Keine offenen Pull Requests nach develop." }));
       return;
@@ -282,7 +396,7 @@ async function prsLaden() {
 function prAnzeigen(pr, basis, danach) {
   const zustand = prZustand(pr);
   return element("div", { klasse: "eintrag", "data-pr": String(pr.number) },
-    element("h4", {}, element("a", { href: pr.html_url, target: "_blank", rel: "noopener", text: "#" + pr.number + " " + pr.title })),
+    element("h3", {}, element("a", { href: pr.html_url, target: "_blank", rel: "noopener", text: "#" + pr.number + " " + pr.title })),
     element("p", { klasse: "hinweis", text: "von " + pr.head.ref + " · " + zustand.text }),
     element("div", { klasse: "knoepfe" },
       element("button", { klasse: "knopf", type: "button", disabled: !zustand.mergebar, text: "Nach " + basis + " mergen",
@@ -296,6 +410,8 @@ async function prMergen(pr, basis, knopf, danach) {
       await github("prMergen", { nummer: pr.number, sha: pr.head.sha });
       statusZeigen("Pull Request #" + pr.number + " nach " + basis + " gemergt.");
       danach();
+      // Nach einem Merge nach develop hat develop neue Commits für main.
+      if (basis === "develop") mainBereichLaden();
     } catch (fehler) {
       statusZeigen(fehler.message, true);
     }
@@ -310,6 +426,7 @@ async function mainBereichLaden() {
   bereich.replaceChildren(element("p", { klasse: "hinweis", text: "Lädt …" }));
   try {
     const vergleich = await github("vergleich", { basis: "main", kopf: "develop" });
+    zaehlerSetzen("main", vergleich.ahead_by);
     if (vergleich.ahead_by === 0) {
       bereich.replaceChildren(element("p", { klasse: "hinweis", text: "main ist auf dem Stand von develop. Nichts zu mergen." }));
       return;

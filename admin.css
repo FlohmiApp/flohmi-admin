@@ -1,7 +1,10 @@
-/* Admin-Seite (Ticket #43). Farben und Schriften kommen aus theme.css der App
+/* Admin-Seite (Ticket #43, Menü Ticket #111). Farben und Schriften kommen aus theme.css der App
    (npm run farben), hier stehen nur Rollen wie var(--color-primary). */
 
 * { box-sizing: border-box; }
+
+/* „hidden“ gilt immer, auch bei Elementen mit display: grid oder flex (z. B. .verwaltung). */
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -10,13 +13,13 @@ body {
   font: 16px/1.5 var(--font-body);
 }
 
-.kopf, main { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+.kopf, main { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
 .kopf { display: flex; align-items: center; justify-content: space-between; padding-top: 16px; }
 
 h1, h2, h3 { font-family: var(--font-heading); line-height: 1.2; }
 h1 { color: var(--color-primary); font-size: 1.6rem; margin: 0; }
 h2 { font-size: 1.25rem; margin: 0 0 8px; }
-h3 { font-size: 1.05rem; margin: 20px 0 8px; }
+h3 { font-size: 1.05rem; margin: 0 0 4px; }
 
 .karte {
   background: var(--color-surface);
@@ -25,6 +28,7 @@ h3 { font-size: 1.05rem; margin: 20px 0 8px; }
   padding: 16px;
   margin: 16px 0;
 }
+.karte.schmal { max-width: 520px; }
 
 .zeile { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .zeile h2, .zeile h3 { margin: 0; }
@@ -58,19 +62,104 @@ input {
 .knopf-warnung { background: transparent; color: var(--color-error); border-color: var(--color-error); }
 
 .status:empty { display: none; }
-.status { padding: 10px 12px; border-radius: 10px; background: var(--color-primary-soft); }
+.status { padding: 10px 12px; border-radius: 10px; background: var(--color-primary-soft); margin: 16px 0 0; }
 .status.fehler { background: transparent; border: 1px solid var(--color-error); color: var(--color-error); }
 
 .hinweis { color: var(--color-text-muted); font-size: 0.92rem; }
+.hinweis-kasten { padding: 10px 12px; border-radius: 10px; background: var(--color-primary-soft); }
 
 .eintrag { border-top: 1px solid var(--color-border); padding: 12px 0; }
 .eintrag:first-child { border-top: 0; }
-.eintrag h4 { margin: 0 0 4px; font-size: 1rem; }
 .eintrag dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; }
 .eintrag dt { color: var(--color-text-muted); }
 .eintrag dd { margin: 0; overflow-wrap: anywhere; }
 .eintrag .knoepfe { display: flex; gap: 8px; flex-wrap: wrap; }
 .eintrag .warnung { color: var(--color-error); font-weight: 600; }
+.eintrag h3 a { color: var(--color-primary); }
+
+/* ---------- Menü nach Aufgaben (Ticket #111) ---------- */
+
+.verwaltung { display: grid; gap: 16px; margin-top: 16px; }
+
+.menue { display: grid; gap: 12px; align-content: start; }
+
+.menue-gruppe {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 12px;
+}
+.menue-gruppe h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 0 4px;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+.menue-gruppe ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+
+.menue-eintrag {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.menue-eintrag:hover { background: var(--color-surface-alt); }
+.menue-eintrag:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.menue-eintrag[aria-current="page"] {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.menue-eintrag .symbol { width: 1.5em; text-align: center; flex: none; }
+.menue-eintrag .titel { flex: 1; }
+.menue-eintrag .zaehler {
+  min-width: 1.6em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+}
+.menue-eintrag[data-aktion="abmelden"] { color: var(--color-error); }
+
+.inhalt { min-width: 0; }
+.inhalt .karte:first-of-type { margin-top: 0; }
+.zurueck {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+/* Handy: entweder Menü oder Bereich. */
+@media (max-width: 899px) {
+  .verwaltung.zeigt-menue .inhalt { display: none; }
+  .verwaltung:not(.zeigt-menue) .menue { display: none; }
+}
+
+/* PC: Menü links, Bereich rechts. */
+@media (min-width: 900px) {
+  .verwaltung { grid-template-columns: 330px minmax(0, 1fr); align-items: start; }
+  .zurueck { display: none; }
+}
 
 @media (max-width: 420px) {
   .eintrag dl { grid-template-columns: 1fr; }

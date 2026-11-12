@@ -10,19 +10,62 @@ const GITHUB_API = "https://api.github.com";
 const TOKEN_SPEICHER = "flohmi-admin-github";
 
 // Workflows mit „Run workflow“ (workflow_dispatch). Alle laufen nur auf main.
-// Ein Test prüft, dass die Liste zu .github/workflows/ passt.
+// Ein Test prüft, dass die Liste zu .github/workflows/ passt. gruppe: wo er im Menü steht.
 const STARTBARE_WORKFLOWS = [
-  { datei: "sammeln.yml", titel: "Märkte sammeln",
+  { datei: "sammeln.yml", titel: "Märkte sammeln", gruppe: "maerkte", symbol: "🔄",
     text: "Holt neue Märkte und übernimmt freigegebene Meldungen in die App (läuft sonst alle 3 Stunden)." },
-  { datei: "rechtliches-seiten.yml", titel: "Rechtstexte veröffentlichen",
+  { datei: "play-store-build.yml", titel: "App Bundle für Google Play", gruppe: "veroeffentlichen", symbol: "📦",
+    text: "Baut das signierte App Bundle, wenn es zum Stand auf main ein Release gibt." },
+  { datei: "rechtliches-seiten.yml", titel: "Rechtstexte veröffentlichen", gruppe: "wartung", symbol: "⚖️",
     text: "Baut die öffentlichen Seiten zu Datenschutz, Impressum und „Konto löschen“ neu." },
-  { datei: "supabase-migrationen.yml", titel: "Datenbank-Migrationen",
+  { datei: "supabase-migrationen.yml", titel: "Datenbank-Migrationen", gruppe: "wartung", symbol: "🗄️",
     text: "Überträgt neue Datenbank-Änderungen aus supabase/migrations." },
-  { datei: "tag-nach-merge.yml", titel: "Tag und Release nachholen",
-    text: "Setzt Tag und Release für den letzten Merge nach main, falls sie fehlen." },
-  { datei: "play-store-build.yml", titel: "App Bundle für Google Play",
-    text: "Baut das signierte App Bundle, wenn es zum Stand auf main ein Release gibt." }
+  { datei: "tag-nach-merge.yml", titel: "Tag und Release nachholen", gruppe: "wartung", symbol: "🏷️",
+    text: "Setzt Tag und Release für den letzten Merge nach main, falls sie fehlen." }
 ];
+
+// --- Menü (Ticket #111) ------------------------------------------------------------------
+// Gruppen nach Aufgaben. Jeder Bereich der Seite steht genau einmal im Menü.
+// bereich: Ziel in der Adresse (#meldungen, #workflow:sammeln.yml …); github: braucht die
+// GitHub-Verbindung; aktion: kein Bereich, sondern ein Knopf (Abmelden).
+const MENUE_GRUPPEN = [
+  { id: "maerkte", titel: "Märkte", symbol: "🛍️", eintraege: [
+    { bereich: "meldungen", titel: "Offene Meldungen", symbol: "📋" }
+  ] },
+  { id: "veroeffentlichen", titel: "Veröffentlichen", symbol: "🚀", eintraege: [
+    { bereich: "prs", titel: "Pull Requests nach develop", symbol: "🔀", github: true },
+    { bereich: "main", titel: "develop nach main", symbol: "⏫", github: true }
+  ] },
+  { id: "wartung", titel: "Wartung", symbol: "🛠️", eintraege: [] },
+  { id: "verbindung", titel: "Verbindung", symbol: "🔑", eintraege: [
+    { bereich: "github", titel: "GitHub-Verbindung", symbol: "🔗" },
+    { aktion: "abmelden", titel: "Abmelden", symbol: "🚪" }
+  ] }
+];
+const START_BEREICH = "meldungen";
+
+// Das fertige Menü: Gruppen mit ihren Einträgen; die Workflows stehen in ihrer Gruppe
+// jeweils nach den festen Einträgen.
+function adminMenue() {
+  return MENUE_GRUPPEN.map(function (gruppe) {
+    const workflows = STARTBARE_WORKFLOWS.filter((w) => w.gruppe === gruppe.id).map((w) => ({
+      bereich: "workflow:" + w.datei, titel: w.titel, symbol: w.symbol, github: true, workflow: w.datei
+    }));
+    return { ...gruppe, eintraege: gruppe.eintraege.concat(workflows) };
+  });
+}
+
+// Alle Einträge, die zu einem Bereich führen (ohne Knöpfe wie „Abmelden“).
+function menueBereiche() {
+  return adminMenue().flatMap((gruppe) => gruppe.eintraege.filter((e) => e.bereich).map((e) => ({ ...e, gruppe: gruppe.id })));
+}
+
+// „#workflow:sammeln.yml“ → der passende Menüeintrag, sonst null (dann zeigt die Seite das Menü
+// bzw. am PC den Startbereich).
+function bereichAusAdresse(adresse) {
+  const name = decodeURIComponent(String(adresse || "").replace(/^#/, ""));
+  return menueBereiche().find((eintrag) => eintrag.bereich === name) || null;
+}
 
 // Ein GitHub-Token hat eines dieser Formate (fein abgestuft, klassisch, OAuth).
 function tokenPruefen(token) {
@@ -147,6 +190,7 @@ function freigabePruefen(meldung, heute = new Date()) {
 if (typeof module !== "undefined") {
   module.exports = {
     ADMIN_REPO, GITHUB_API, TOKEN_SPEICHER, STARTBARE_WORKFLOWS, MELDUNG_SPALTEN,
+    MENUE_GRUPPEN, START_BEREICH, adminMenue, menueBereiche, bereichAusAdresse,
     tokenPruefen, githubAnfrage, githubFehlerText, prZustand, laufText, mergeFrage,
     meldungZeilen, freigabePruefen
   };
