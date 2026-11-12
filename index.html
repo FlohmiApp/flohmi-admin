@@ -77,6 +77,101 @@
           <div id="main-bereich"></div>
         </section>
 
+        <!-- Ticket #113: Architekturbilder aus doku/architektur/ im privaten Repository, geholt mit
+             dem GitHub-Token (nicht in dieser öffentlichen Seite abgelegt). -->
+        <section id="bereich-architektur" class="karte bereich" data-bereich="architektur" aria-labelledby="architektur-titel" hidden>
+          <h2 id="architektur-titel">🗺️ Architektur und Workflows</h2>
+          <p class="hinweis" id="architektur-quelle"></p>
+          <div id="architektur-reiter" class="reiter" role="tablist" aria-label="Bild auswählen"></div>
+          <div class="zoom-leiste" role="group" aria-label="Größe">
+            <button id="zoom-kleiner" class="knopf knopf-leise" type="button" aria-label="Kleiner">−</button>
+            <span id="zoom-stufe" class="zoom-stufe" aria-live="polite">an Breite angepasst</span>
+            <button id="zoom-groesser" class="knopf knopf-leise" type="button" aria-label="Größer">+</button>
+            <button id="zoom-einpassen" class="knopf knopf-leise" type="button">Einpassen</button>
+            <a id="architektur-neuer-tab" class="knopf knopf-leise" target="_blank" rel="noopener">In neuem Tab öffnen</a>
+          </div>
+          <div id="architektur-rahmen" class="bild-rahmen" role="tabpanel" aria-labelledby="architektur-titel">
+            <p id="architektur-status" class="hinweis">Lädt …</p>
+            <img id="architektur-bild" alt="" hidden>
+          </div>
+          <p class="hinweis">Erklärung zu den Bildern:
+            <a id="architektur-erklaerung" target="_blank" rel="noopener">LIESMICH.md auf GitHub</a></p>
+        </section>
+
+        <!-- Ticket #77: Links und Konten aller Dienste. Die Daten liegen in Supabase (nur Admins),
+             nicht in dieser öffentlichen Seite. -->
+        <section id="bereich-dienste" class="karte bereich" data-bereich="dienste" aria-labelledby="dienste-titel" hidden>
+          <div class="zeile">
+            <h2 id="dienste-titel">🧰 Dienste und Zugänge</h2>
+            <button id="dienst-neu" class="knopf knopf-leise" type="button">+ Dienst hinzufügen</button>
+          </div>
+          <p class="hinweis">Links und Konten der Dienste, die Flohmi nutzt. Nur für Admins sichtbar.
+            Keine Passwörter, Schlüssel oder Tokens eintragen, die gehören in einen Passwort-Manager.</p>
+          <form id="dienst-formular" class="dienst-formular" novalidate hidden>
+            <h3 id="dienst-formular-titel">Dienst hinzufügen</h3>
+            <label for="dienst-dienst">Dienst</label>
+            <input id="dienst-dienst" name="dienst" maxlength="100" required>
+            <p class="feldfehler" data-fehler="dienst" hidden></p>
+            <label for="dienst-zweck">Wofür</label>
+            <input id="dienst-zweck" name="zweck" maxlength="300">
+            <p class="feldfehler" data-fehler="zweck" hidden></p>
+            <label for="dienst-link">Link</label>
+            <input id="dienst-link" name="link" type="url" inputmode="url" maxlength="300" placeholder="https://">
+            <p class="feldfehler" data-fehler="link" hidden></p>
+            <label for="dienst-konto">Konto (E-Mail-Adresse oder Benutzername)</label>
+            <input id="dienst-konto" name="konto" maxlength="200" autocomplete="off">
+            <p class="feldfehler" data-fehler="konto" hidden></p>
+            <label for="dienst-hinweis">Hinweis</label>
+            <input id="dienst-hinweis" name="hinweis" maxlength="300">
+            <p class="feldfehler" data-fehler="hinweis" hidden></p>
+            <div class="knoepfe">
+              <button class="knopf" type="submit">Speichern</button>
+              <button id="dienst-abbrechen" class="knopf knopf-leise" type="button">Abbrechen</button>
+            </div>
+          </form>
+          <div id="dienste-liste"></div>
+        </section>
+
+        <!-- Ticket #122: Personen, die die Android-App für Google Play testen. Personenbezogene
+             Daten: Sie liegen in Supabase (nur Admins), nie in dieser öffentlichen Seite. -->
+        <section id="bereich-tester" class="karte bereich" data-bereich="tester" aria-labelledby="tester-titel" hidden>
+          <div class="zeile">
+            <h2 id="tester-titel">🧪 Testerinnen und Tester</h2>
+            <button id="tester-neu" class="knopf knopf-leise" type="button">+ Person hinzufügen</button>
+          </div>
+          <p class="hinweis">Wer die Android-App für Google Play testet. Nur zur eigenen Übersicht und
+            nur für Admins sichtbar; für Build und Veröffentlichung wird die Liste nicht gebraucht.</p>
+          <form id="tester-formular" class="dienst-formular" novalidate hidden>
+            <h3 id="tester-formular-titel">Person hinzufügen</h3>
+            <label for="tester-name">Name</label>
+            <input id="tester-name" name="name" maxlength="100" autocomplete="off" required>
+            <p class="feldfehler" data-fehler="name" hidden></p>
+            <label for="tester-telefon">Telefonnummer</label>
+            <input id="tester-telefon" name="telefon" type="tel" inputmode="tel" maxlength="30" autocomplete="off"
+              placeholder="z. B. 0151 2345678">
+            <p class="feldfehler" data-fehler="telefon" hidden></p>
+            <label for="tester-google-mail">Google-Mail</label>
+            <input id="tester-google-mail" name="google_mail" type="email" inputmode="email" maxlength="200"
+              autocomplete="off" placeholder="name@gmail.com">
+            <p class="feldfehler" data-fehler="google_mail" hidden></p>
+            <div class="knoepfe">
+              <button class="knopf" type="submit">Speichern</button>
+              <button id="tester-abbrechen" class="knopf knopf-leise" type="button">Abbrechen</button>
+            </div>
+          </form>
+          <div class="zeile">
+            <p id="tester-anzahl" class="hinweis"></p>
+            <button id="tester-mails-kopieren" class="knopf knopf-leise" type="button" hidden>Google-Mails kopieren</button>
+          </div>
+          <div class="tabelle-rahmen">
+            <table id="tester-tabelle" class="tester-tabelle" hidden>
+              <thead><tr><th scope="col">Name</th><th scope="col">Telefonnummer</th><th scope="col">Google-Mail</th>
+                <th scope="col"><span class="nur-vorleser">Aktionen</span></th></tr></thead>
+              <tbody id="tester-liste"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section id="bereich-github" class="karte bereich" data-bereich="github" aria-labelledby="github-titel" hidden>
           <h2 id="github-titel">🔗 GitHub-Verbindung</h2>
           <p id="github-hinweis" class="hinweis-kasten" hidden></p>

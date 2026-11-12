@@ -116,6 +116,7 @@ function bereichZeigen() {
   }
   menueMarkieren(eintrag.bereich);
   document.title = eintrag.titel + " – Flohmi Admin";
+  if (ziel.bereich === "architektur") architekturZeigen();
 }
 
 function menueMarkieren(bereich) {
@@ -164,6 +165,9 @@ $("code-formular").addEventListener("submit", async function (ereignis) {
 async function abmelden() {
   await client.auth.signOut();
   tokenVergessen();
+  // Personenbezogene Daten (Ticket #122) nicht im ausgeblendeten Teil der Seite lassen.
+  tester = [];
+  $("tester-liste").replaceChildren();
   history.replaceState(null, "", location.pathname + location.search);
   statusZeigen("Abgemeldet.");
 }
@@ -190,6 +194,8 @@ async function anmeldungAnzeigen(sitzung) {
   menueZeichnen();
   bereichZeigen();
   meldungenLaden();
+  diensteLaden();
+  testerLaden();
   tokenAusSpeicher();
 }
 
@@ -254,6 +260,270 @@ async function statusSetzen(meldung, status, knopf, eintrag) {
 
 $("meldungen-laden").addEventListener("click", meldungenLaden);
 
+// --- Architektur und Workflows (Ticket #113) ----------------------------------------------
+// Die Bilder kommen mit dem GitHub-Token aus dem privaten Repository. Angezeigt werden sie als
+// <img> mit einer Blob-Adresse: So läuft im SVG kein Code, und Zoom geht über die Breite.
+
+const architekturCache = new Map();
+let architekturAktiv = ARCHITEKTUR_BILDER[0].datei;
+let architekturZoom = null;
+
+function architekturReiterZeichnen() {
+  $("architektur-reiter").replaceChildren(...ARCHITEKTUR_BILDER.map((bild) =>
+    element("button", { klasse: "reiter-knopf", type: "button", role: "tab", "data-datei": bild.datei,
+      "aria-selected": String(bild.datei === architekturAktiv), text: bild.titel,
+      onclick: () => { architekturAktiv = bild.datei; architekturZeigen(); } })));
+}
+
+function architekturZoomAnwenden() {
+  const bild = $("architektur-bild");
+  bild.style.width = architekturZoom === null ? "100%" : Math.round((bild.naturalWidth || 1200) * architekturZoom) + "px";
+  bild.style.maxWidth = architekturZoom === null ? "100%" : "none";
+  $("zoom-stufe").textContent = zoomText(architekturZoom);
+}
+
+async function architekturZeigen() {
+  if (!githubVerbunden) return;
+  architekturReiterZeichnen();
+  $("architektur-quelle").textContent = "Stand: Branch „" + ARCHITEKTUR_BRANCH + "“ in " + ADMIN_REPO +
+    ", Ordner doku/architektur/. Die Bilder werden bei Änderungen an Diensten und Workflows mit angepasst.";
+  $("architektur-erklaerung").href = githubDateiLink(ARCHITEKTUR_ERKLAERUNG);
+  const bild = $("architektur-bild");
+  const status = $("architektur-status");
+  const datei = architekturAktiv;
+  bild.alt = ARCHITEKTUR_BILDER.find((b) => b.datei === datei).titel;
+  try {
+    if (!architekturCache.has(datei)) {
+      status.textContent = "Lädt …";
+      status.hidden = false;
+      bild.hidden = true;
+      const svg = await github("datei", { pfad: datei, ref: ARCHITEKTUR_BRANCH });
+      architekturCache.set(datei, URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })));
+    }
+    if (architekturAktiv !== datei) return; // Inzwischen anderer Reiter gewählt.
+    bild.onload = architekturZoomAnwenden;
+    bild.src = architekturCache.get(datei);
+    $("architektur-neuer-tab").href = architekturCache.get(datei);
+    bild.hidden = false;
+    status.hidden = true;
+    architekturZoomAnwenden();
+  } catch (fehler) {
+    bild.hidden = true;
+    status.hidden = false;
+    status.textContent = "Bild konnte nicht geladen werden: " + fehler.message;
+  }
+}
+
+$("zoom-groesser").addEventListener("click", () => { architekturZoom = zoomAendern(architekturZoom, +1); architekturZoomAnwenden(); });
+$("zoom-kleiner").addEventListener("click", () => { architekturZoom = zoomAendern(architekturZoom, -1); architekturZoomAnwenden(); });
+$("zoom-einpassen").addEventListener("click", () => { architekturZoom = null; architekturZoomAnwenden(); });
+
+// --- Dienste und Zugänge (Ticket #77) ------------------------------------------------------
+// Tabelle „admin_dienste“ in Supabase: lesen und ändern nur für Admins.
+
+let dienste = [];
+let dienstInBearbeitung = null;
+
+async function diensteLaden() {
+  const liste = $("dienste-liste");
+  liste.replaceChildren(element("p", { klasse: "hinweis", text: "Lädt …" }));
+  const { data, error } = await client.from("admin_dienste").select(DIENST_SPALTEN)
+    .order("reihenfolge", { ascending: true }).order("id", { ascending: true });
+  if (error) {
+    liste.replaceChildren(element("p", { klasse: "warnung", text: "Dienste konnten nicht geladen werden: " + error.message }));
+    return;
+  }
+  dienste = data;
+  zaehlerSetzen("dienste", data.filter(dienstUnvollstaendig).length);
+  if (data.length === 0) {
+    liste.replaceChildren(element("p", { klasse: "hinweis", text: "Noch keine Dienste eingetragen." }));
+    return;
+  }
+  liste.replaceChildren(...data.map(dienstAnzeigen));
+}
+
+function dienstAnzeigen(dienst) {
+  // Nur echte https-Adressen werden zum Link (die Datenbank lässt ohnehin nichts anderes zu).
+  const titel = /^https:\/\/\S+$/.test(String(dienst.link || ""))
+    ? element("a", { href: dienst.link, target: "_blank", rel: "noopener noreferrer", text: dienst.dienst })
+    : dienst.dienst;
+  const daten = element("dl");
+  for (const [name, wert] of [["Wofür", dienst.zweck], ["Konto", dienst.konto], ["Hinweis", dienst.hinweis]]) {
+    if (wert) daten.append(element("dt", { text: name }), element("dd", { text: wert }));
+  }
+  return element("article", { klasse: "eintrag dienst", "data-dienst": String(dienst.id) },
+    element("h3", {}, titel),
+    daten.children.length ? daten : null,
+    dienstUnvollstaendig(dienst) ? element("p", { klasse: "warnung", text: "Konto noch ergänzen." }) : null,
+    element("div", { klasse: "knoepfe" },
+      element("button", { klasse: "knopf knopf-leise", type: "button", text: "Bearbeiten",
+        onclick: () => dienstFormularOeffnen(dienst) }),
+      element("button", { klasse: "knopf knopf-leise knopf-warnung", type: "button", text: "Löschen",
+        onclick: (e) => dienstLoeschen(dienst, e.currentTarget) })));
+}
+
+function dienstFehlerZeigen(fehler) {
+  for (const feld of document.querySelectorAll("#dienst-formular [data-fehler]")) {
+    const text = fehler[feld.dataset.fehler] || "";
+    feld.textContent = text;
+    feld.hidden = !text;
+  }
+}
+
+function dienstFormularOeffnen(dienst = null) {
+  const formular = $("dienst-formular");
+  dienstInBearbeitung = dienst;
+  $("dienst-formular-titel").textContent = dienst ? "„" + dienst.dienst + "“ bearbeiten" : "Dienst hinzufügen";
+  for (const feld of Object.keys(DIENST_FELDER)) formular.elements[feld].value = (dienst && dienst[feld]) || "";
+  dienstFehlerZeigen({});
+  formular.hidden = false;
+  formular.elements.dienst.focus();
+}
+
+function dienstFormularSchliessen() {
+  $("dienst-formular").hidden = true;
+  dienstInBearbeitung = null;
+}
+
+$("dienst-neu").addEventListener("click", () => dienstFormularOeffnen());
+$("dienst-abbrechen").addEventListener("click", dienstFormularSchliessen);
+
+$("dienst-formular").addEventListener("submit", async function (ereignis) {
+  ereignis.preventDefault();
+  const eingabe = Object.fromEntries(Object.keys(DIENST_FELDER).map((feld) => [feld, this.elements[feld].value]));
+  const { werte, fehler } = dienstPruefen(eingabe);
+  dienstFehlerZeigen(fehler);
+  if (Object.keys(fehler).length > 0) return;
+  await beschaeftigt(this.querySelector("button[type=submit]"), async () => {
+    const anfrage = dienstInBearbeitung
+      ? client.from("admin_dienste").update({ ...werte, geaendert_am: new Date().toISOString() }).eq("id", dienstInBearbeitung.id)
+      : client.from("admin_dienste").insert({ ...werte, reihenfolge: naechsteReihenfolge(dienste) });
+    const { error } = await anfrage;
+    if (error) return statusZeigen("Nicht gespeichert: " + error.message, true);
+    statusZeigen("„" + werte.dienst + "“ gespeichert.");
+    dienstFormularSchliessen();
+    diensteLaden();
+  });
+});
+
+async function dienstLoeschen(dienst, knopf) {
+  if (!window.confirm("„" + dienst.dienst + "“ wirklich aus der Liste löschen?")) return;
+  await beschaeftigt(knopf, async () => {
+    const { error } = await client.from("admin_dienste").delete().eq("id", dienst.id);
+    if (error) return statusZeigen("Nicht gelöscht: " + error.message, true);
+    statusZeigen("„" + dienst.dienst + "“ gelöscht.");
+    diensteLaden();
+  });
+}
+
+// --- Testerinnen und Tester (Ticket #122) --------------------------------------------------
+// Tabelle „admin_tester“ in Supabase: lesen und ändern nur für Admins.
+// Alle Texte nur per textContent (über element()), nie als HTML.
+
+let tester = [];
+let testerInBearbeitung = null;
+
+async function testerLaden() {
+  const liste = $("tester-liste");
+  const tabelle = $("tester-tabelle");
+  $("tester-anzahl").textContent = "Lädt …";
+  const { data, error } = await client.from("admin_tester").select(TESTER_SPALTEN)
+    .order("name", { ascending: true }).order("id", { ascending: true });
+  if (error) {
+    $("tester-anzahl").textContent = "Liste konnte nicht geladen werden: " + error.message;
+    tabelle.hidden = true;
+    return;
+  }
+  tester = data;
+  $("tester-mails-kopieren").hidden = !testerMails(data);
+  if (data.length === 0) {
+    $("tester-anzahl").textContent = "Noch niemand eingetragen. Mit „+ Person hinzufügen“ legst du die erste Zeile an.";
+    tabelle.hidden = true;
+    liste.replaceChildren();
+    return;
+  }
+  $("tester-anzahl").textContent = testerAnzahlText(data.length);
+  liste.replaceChildren(...data.map(testerZeile));
+  tabelle.hidden = false;
+}
+
+function testerZeile(person) {
+  return element("tr", { "data-tester": String(person.id) },
+    element("td", { text: person.name }),
+    element("td", { text: person.telefon || "–" }),
+    element("td", { text: person.google_mail || "–" }),
+    element("td", {}, element("div", { klasse: "knoepfe" },
+      element("button", { klasse: "knopf knopf-leise", type: "button", text: "Bearbeiten",
+        onclick: () => testerFormularOeffnen(person) }),
+      element("button", { klasse: "knopf knopf-leise knopf-warnung", type: "button", text: "Löschen",
+        onclick: (e) => testerLoeschen(person, e.currentTarget) }))));
+}
+
+function testerFehlerZeigen(fehler) {
+  for (const feld of document.querySelectorAll("#tester-formular [data-fehler]")) {
+    const text = fehler[feld.dataset.fehler] || "";
+    feld.textContent = text;
+    feld.hidden = !text;
+  }
+}
+
+function testerFormularOeffnen(person = null) {
+  const formular = $("tester-formular");
+  testerInBearbeitung = person;
+  $("tester-formular-titel").textContent = person ? "„" + person.name + "“ bearbeiten" : "Person hinzufügen";
+  for (const feld of Object.keys(TESTER_FELDER)) formular.elements[feld].value = (person && person[feld]) || "";
+  testerFehlerZeigen({});
+  formular.hidden = false;
+  formular.elements.name.focus();
+}
+
+function testerFormularSchliessen() {
+  $("tester-formular").hidden = true;
+  testerInBearbeitung = null;
+}
+
+$("tester-neu").addEventListener("click", () => testerFormularOeffnen());
+$("tester-abbrechen").addEventListener("click", testerFormularSchliessen);
+
+$("tester-formular").addEventListener("submit", async function (ereignis) {
+  ereignis.preventDefault();
+  const eingabe = Object.fromEntries(Object.keys(TESTER_FELDER).map((feld) => [feld, this.elements[feld].value]));
+  const { werte, fehler } = testerPruefen(eingabe);
+  testerFehlerZeigen(fehler);
+  if (Object.keys(fehler).length > 0) return;
+  await beschaeftigt(this.querySelector("button[type=submit]"), async () => {
+    const anfrage = testerInBearbeitung
+      ? client.from("admin_tester").update({ ...werte, geaendert_am: new Date().toISOString() }).eq("id", testerInBearbeitung.id)
+      : client.from("admin_tester").insert(werte);
+    const { error } = await anfrage;
+    if (error) return statusZeigen("Nicht gespeichert: " + error.message, true);
+    statusZeigen("„" + werte.name + "“ gespeichert.");
+    testerFormularSchliessen();
+    testerLaden();
+  });
+});
+
+async function testerLoeschen(person, knopf) {
+  if (!window.confirm("„" + person.name + "“ wirklich aus der Testerliste löschen?")) return;
+  await beschaeftigt(knopf, async () => {
+    const { error } = await client.from("admin_tester").delete().eq("id", person.id);
+    if (error) return statusZeigen("Nicht gelöscht: " + error.message, true);
+    statusZeigen("„" + person.name + "“ gelöscht.");
+    testerLaden();
+  });
+}
+
+// Für die Play Console: alle Google-Mails mit Komma getrennt in die Zwischenablage.
+$("tester-mails-kopieren").addEventListener("click", async function () {
+  const mails = testerMails(tester);
+  try {
+    await navigator.clipboard.writeText(mails);
+    statusZeigen("Google-Mails kopiert. In der Play Console bei „Tester“ in die E-Mail-Liste einfügen.");
+  } catch {
+    window.prompt("Kopieren ging nicht automatisch. Bitte hier markieren und kopieren:", mails);
+  }
+});
+
 // --- GitHub ------------------------------------------------------------------------------
 
 async function github(art, werte) {
@@ -263,7 +533,8 @@ async function github(art, werte) {
     antwort = await fetch(anfrage.adresse, {
       method: anfrage.methode,
       headers: {
-        "Accept": "application/vnd.github+json",
+        // „raw“: Dateiinhalt direkt statt JSON (Architekturbilder, Ticket #113).
+        "Accept": anfrage.roh ? "application/vnd.github.raw" : "application/vnd.github+json",
         "Authorization": "Bearer " + githubToken,
         "X-GitHub-Api-Version": "2022-11-28",
         ...(anfrage.daten ? { "Content-Type": "application/json" } : {})
@@ -278,6 +549,7 @@ async function github(art, werte) {
     try { nachricht = (await antwort.json()).message; } catch (fehler) { /* keine Details */ }
     throw new Error(githubFehlerText(antwort.status, nachricht));
   }
+  if (anfrage.roh) return antwort.text();
   return antwort.status === 204 ? null : antwort.json();
 }
 
@@ -293,6 +565,11 @@ function tokenVergessen() {
   $("github-bereich").hidden = true;
   $("token-formular").hidden = false;
   for (const bereich of ["prs", "main"]) zaehlerSetzen(bereich, null);
+  // Mit dem Token geholte Bilder (Ticket #113) wieder vergessen.
+  for (const adresse of architekturCache.values()) URL.revokeObjectURL(adresse);
+  architekturCache.clear();
+  $("architektur-bild").removeAttribute("src");
+  $("architektur-bild").hidden = true;
 }
 
 $("token-formular").addEventListener("submit", async function (ereignis) {

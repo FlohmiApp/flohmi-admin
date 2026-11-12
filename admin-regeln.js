@@ -34,10 +34,14 @@ const MENUE_GRUPPEN = [
   ] },
   { id: "veroeffentlichen", titel: "Veröffentlichen", symbol: "🚀", eintraege: [
     { bereich: "prs", titel: "Pull Requests nach develop", symbol: "🔀", github: true },
-    { bereich: "main", titel: "develop nach main", symbol: "⏫", github: true }
+    { bereich: "main", titel: "develop nach main", symbol: "⏫", github: true },
+    { bereich: "tester", titel: "Testerinnen und Tester", symbol: "🧪" }
   ] },
-  { id: "wartung", titel: "Wartung", symbol: "🛠️", eintraege: [] },
+  { id: "wartung", titel: "Wartung", symbol: "🛠️", eintraege: [
+    { bereich: "architektur", titel: "Architektur und Workflows", symbol: "🗺️", github: true }
+  ] },
   { id: "verbindung", titel: "Verbindung", symbol: "🔑", eintraege: [
+    { bereich: "dienste", titel: "Dienste und Zugänge", symbol: "🧰" },
     { bereich: "github", titel: "GitHub-Verbindung", symbol: "🔗" },
     { aktion: "abmelden", titel: "Abmelden", symbol: "🚪" }
   ] }
@@ -97,6 +101,11 @@ function githubAnfrage(art, werte = {}) {
         daten: { merge_method: "merge", sha: werte.sha } };
     case "vergleich":
       return { methode: "GET", adresse: repo + "/compare/" + encodeURIComponent(werte.basis) + "..." + encodeURIComponent(werte.kopf) };
+    case "datei":
+      // Rohinhalt einer Datei aus dem (privaten) Repository, z. B. ein Architekturbild.
+      return { methode: "GET", roh: true,
+        adresse: repo + "/contents/" + String(werte.pfad).split("/").map(encodeURIComponent).join("/") +
+          "?ref=" + encodeURIComponent(werte.ref) };
     case "prAnlegen":
       return { methode: "POST", adresse: repo + "/pulls",
         daten: { title: werte.titel, head: werte.kopf, base: werte.basis, body: werte.text || "" } };
@@ -187,10 +196,130 @@ function freigabePruefen(meldung, heute = new Date()) {
   return "";
 }
 
+// --- Architektur und Workflows (Ticket #113) ----------------------------------------------
+// Die Bilder liegen nur im privaten Repository (doku/architektur/, Erklärung in LIESMICH.md).
+// Die Seite holt sie mit dem GitHub-Token der Admin über die API, so sind sie nirgends
+// öffentlich und immer auf dem Stand von develop. Ein Test prüft, dass die Liste zum Ordner passt.
+const ARCHITEKTUR_BRANCH = "develop";
+const ARCHITEKTUR_BILDER = [
+  { datei: "doku/architektur/architektur-app.svg", titel: "App und Dienste" },
+  { datei: "doku/architektur/architektur-workflows.svg", titel: "Entwicklung und Workflows" }
+];
+const ARCHITEKTUR_ERKLAERUNG = "doku/architektur/LIESMICH.md";
+const ZOOM_STUFEN = [0.5, 0.75, 1, 1.5, 2, 3];
+
+// Link zur Datei auf GitHub (öffnet nur, wer Zugriff auf das Repository hat).
+function githubDateiLink(pfad, ref = ARCHITEKTUR_BRANCH) {
+  return "https://github.com/" + ADMIN_REPO + "/blob/" + encodeURIComponent(ref) + "/" +
+    String(pfad).split("/").map(encodeURIComponent).join("/");
+}
+
+// Nächste Zoomstufe: richtung +1 größer, -1 kleiner; null = an die Breite angepasst.
+// Aus „angepasst“ heraus geht es von 100 % aus weiter.
+function zoomAendern(aktuell, richtung) {
+  const basis = aktuell === null ? 1 : aktuell;
+  if (richtung > 0) return ZOOM_STUFEN.find((stufe) => stufe > basis + 1e-9) ?? ZOOM_STUFEN[ZOOM_STUFEN.length - 1];
+  return [...ZOOM_STUFEN].reverse().find((stufe) => stufe < basis - 1e-9) ?? ZOOM_STUFEN[0];
+}
+
+function zoomText(stufe) {
+  return stufe === null ? "an Breite angepasst" : Math.round(stufe * 100) + " %";
+}
+
+// --- Dienste und Zugänge (Ticket #77) ------------------------------------------------------
+// Tabelle „admin_dienste“, nur für Admins (Migration 20261112190000_admin_dienste.sql).
+// Hier stehen Links und Kontonamen, nie Passwörter, Schlüssel oder Tokens.
+
+const DIENST_SPALTEN = "id, reihenfolge, dienst, zweck, link, konto, hinweis";
+const DIENST_FELDER = {
+  dienst: { name: "Dienst", laenge: 100, pflicht: true },
+  zweck: { name: "Wofür", laenge: 300 },
+  link: { name: "Link", laenge: 300 },
+  konto: { name: "Konto", laenge: 200 },
+  hinweis: { name: "Hinweis", laenge: 300 }
+};
+// Sieht nach Passwort, Schlüssel oder Token aus (wie die Regel in der Datenbank).
+// [t] und [e]: Das Muster selbst soll nicht wie ein Schlüssel aussehen (Prüfung beim Veröffentlichen).
+const GEHEIMNIS_MUSTER = /sb_secre[t]_|service_rol[e]|ghp_[a-z0-9]{20}|github_pat_|sk-ant-|-----begin|passwor[dt]\s*[:=]/i;
+
+// Bereinigt und prüft die Eingaben. Gibt { werte, fehler } zurück; fehler: Feld → Text.
+function dienstPruefen(eingabe) {
+  const werte = {};
+  const fehler = {};
+  for (const [feld, regel] of Object.entries(DIENST_FELDER)) {
+    const wert = String((eingabe && eingabe[feld]) || "").trim();
+    werte[feld] = wert || null;
+    if (regel.pflicht && !wert) fehler[feld] = "Bitte ausfüllen.";
+    else if ([...wert].length > regel.laenge) fehler[feld] = "Höchstens " + regel.laenge + " Zeichen.";
+    else if (GEHEIMNIS_MUSTER.test(wert)) fehler[feld] = "Keine Passwörter, Schlüssel oder Tokens eintragen.";
+  }
+  if (werte.link && !fehler.link && !/^https:\/\/[^\s]+$/.test(werte.link)) {
+    fehler.link = "Bitte eine vollständige Adresse mit https:// eingeben.";
+  }
+  return { werte, fehler };
+}
+
+// Reihenfolge für einen neuen Eintrag: hinter dem letzten.
+function naechsteReihenfolge(dienste) {
+  return (dienste || []).reduce((hoechste, d) => Math.max(hoechste, Number(d.reihenfolge) || 0), 0) + 10;
+}
+
+// Noch auszufüllen? („TODO“ im Konto.)
+function dienstUnvollstaendig(dienst) {
+  return /\bTODO\b/i.test(String(dienst.konto || ""));
+}
+
+// --- Testerinnen und Tester (Ticket #122) --------------------------------------------------
+// Tabelle „admin_tester“, nur für Admins (Migration 20261112210000_admin_tester.sql).
+// Personen, die die Android-App für Google Play testen. Nur zur eigenen Übersicht.
+
+const TESTER_SPALTEN = "id, name, telefon, google_mail";
+const TESTER_FELDER = {
+  name: { name: "Name", laenge: 100, pflicht: true },
+  telefon: { name: "Telefonnummer", laenge: 30 },
+  google_mail: { name: "Google-Mail", laenge: 200 }
+};
+
+// Bereinigt und prüft die Eingaben (wie die Regeln in der Datenbank).
+// Gibt { werte, fehler } zurück; fehler: Feld → Text.
+function testerPruefen(eingabe) {
+  const werte = {};
+  const fehler = {};
+  for (const [feld, regel] of Object.entries(TESTER_FELDER)) {
+    const wert = String((eingabe && eingabe[feld]) || "").trim();
+    werte[feld] = wert || null;
+    if (regel.pflicht && !wert) fehler[feld] = "Bitte ausfüllen.";
+    else if ([...wert].length > regel.laenge) fehler[feld] = "Höchstens " + regel.laenge + " Zeichen.";
+  }
+  if (werte.telefon && !fehler.telefon && !/^\+?[0-9 ()/-]{3,30}$/.test(werte.telefon)) {
+    fehler.telefon = "Nur Ziffern, Leerzeichen, + ( ) / und -.";
+  }
+  if (werte.google_mail && !fehler.google_mail) {
+    werte.google_mail = werte.google_mail.toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(werte.google_mail)) fehler.google_mail = "Bitte eine vollständige E-Mail-Adresse eingeben.";
+  }
+  return { werte, fehler };
+}
+
+// Alle Google-Mails, durch Komma getrennt, ohne doppelte: So lassen sie sich in der
+// Play Console bei „Tester“ in eine E-Mail-Liste einfügen.
+function testerMails(tester) {
+  const mails = (tester || []).map((t) => String(t.google_mail || "").trim().toLowerCase()).filter(Boolean);
+  return [...new Set(mails)].join(", ");
+}
+
+// „1 Person“ / „3 Personen“
+function testerAnzahlText(anzahl) {
+  return anzahl === 1 ? "1 Person" : anzahl + " Personen";
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     ADMIN_REPO, GITHUB_API, TOKEN_SPEICHER, STARTBARE_WORKFLOWS, MELDUNG_SPALTEN,
     MENUE_GRUPPEN, START_BEREICH, adminMenue, menueBereiche, bereichAusAdresse,
+    ARCHITEKTUR_BRANCH, ARCHITEKTUR_BILDER, ARCHITEKTUR_ERKLAERUNG, ZOOM_STUFEN, githubDateiLink, zoomAendern, zoomText,
+    DIENST_SPALTEN, DIENST_FELDER, GEHEIMNIS_MUSTER, dienstPruefen, naechsteReihenfolge, dienstUnvollstaendig,
+    TESTER_SPALTEN, TESTER_FELDER, testerPruefen, testerMails, testerAnzahlText,
     tokenPruefen, githubAnfrage, githubFehlerText, prZustand, laufText, mergeFrage,
     meldungZeilen, freigabePruefen
   };
