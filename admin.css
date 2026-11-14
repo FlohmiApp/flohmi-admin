@@ -121,6 +121,38 @@ input {
 .feldfehler { margin: 4px 0 0; color: var(--color-error); font-size: 0.9rem; }
 .eintrag.dienst .knoepfe { margin-top: 4px; }
 
+/* Dashboard (Ticket #139): Kacheln, am Handy zwei nebeneinander, am PC mehr */
+.kacheln {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.kachel {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-alt);
+  padding: 12px;
+  min-width: 0;
+}
+.kachel-breit { grid-column: 1 / -1; }
+.kachel h3 { margin: 0 0 6px; font-size: 0.95rem; }
+.kachel .zahl { margin: 0; font-size: 2rem; font-weight: 700; line-height: 1.1; }
+.kachel a { color: var(--color-primary); font-size: 0.9rem; }
+.kachel .warnung, .kachel .hinweis { margin: 0; font-size: 0.88rem; overflow-wrap: anywhere; }
+.kachel dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; }
+.kachel dt { color: var(--color-text-muted); }
+.kachel dd { margin: 0; font-weight: 700; text-align: right; }
+.status-liste { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.status-liste li {
+  flex: 1 1 110px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  padding: 6px 10px;
+}
+.status-liste .zahl { font-size: 1.5rem; }
+.status-liste .name { display: block; color: var(--color-text-muted); font-size: 0.85rem; }
+
 /* Testerinnen und Tester (Ticket #122): Tabelle, am Handy seitlich verschiebbar */
 .tabelle-rahmen { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .tester-tabelle { width: 100%; border-collapse: collapse; }

@@ -197,12 +197,103 @@ async function anmeldungAnzeigen(sitzung) {
   meldungenLaden();
   diensteLaden();
   testerLaden();
+  dashboardSupabaseLaden();
   githubVerbinden();
 }
 
 client.auth.onAuthStateChange(function (ereignis, sitzung) {
   // Nicht direkt im Rückruf auf Supabase warten (sonst kann die Bibliothek hängen bleiben).
   setTimeout(() => anmeldungAnzeigen(sitzung), 0);
+});
+
+// --- Dashboard (Ticket #139) -------------------------------------------------------------
+// Jede Kachel lädt für sich. Schlägt eine fehl, zeigt nur sie eine Meldung.
+
+function kachelSetzen(name, ...inhalt) {
+  // Leere Teile (z. B. kein Link) weglassen, sonst stünde dort „null“.
+  document.querySelector(`.kachel[data-kennzahl="${name}"] .kachel-inhalt`).replaceChildren(...inhalt.filter(Boolean));
+}
+
+function kachelFehler(name, text) {
+  kachelSetzen(name, element("p", { klasse: "warnung", text: text }));
+}
+
+function kachelZahl(name, zahl, link) {
+  kachelSetzen(name, element("p", { klasse: "zahl", text: String(zahl) }),
+    link ? element("a", { href: link.ziel, text: link.text }) : null);
+}
+
+// Märkte zur Freigabe, Tester und registrierte User: eine Abfrage bei Supabase, nur Zahlen.
+async function dashboardSupabaseLaden() {
+  for (const name of ["meldungen", "tester", "nutzer"]) kachelSetzen(name, element("p", { klasse: "hinweis", text: "Lädt …" }));
+  const { data, error } = await client.rpc("admin_kennzahlen");
+  const zahlen = error ? {} : (data || {});
+  const fehler = error ? "Nicht geladen: " + error.message : "Keine Zahl erhalten.";
+  const kacheln = [
+    ["meldungen", zahlen.offene_meldungen, { ziel: "#meldungen", text: "Zu den Meldungen" }],
+    ["tester", zahlen.tester, { ziel: "#tester", text: "Zur Testerdatenbank" }],
+    ["nutzer", zahlen.nutzer, null]
+  ];
+  for (const [name, wert, link] of kacheln) {
+    if (kennzahl(wert) === null) kachelFehler(name, fehler);
+    else kachelZahl(name, wert, link);
+  }
+}
+
+// Tickets nach Status und Versionen: über die Edge Function „github“.
+async function dashboardGithubLaden() {
+  if (!githubVerbunden) {
+    for (const name of ["tickets", "version"]) {
+      kachelFehler(name, "Braucht die GitHub-Verbindung (siehe „Verbindung → GitHub-Verbindung“).");
+    }
+    return;
+  }
+  for (const name of ["tickets", "version"]) kachelSetzen(name, element("p", { klasse: "hinweis", text: "Lädt …" }));
+  ticketsLaden();
+  versionenLaden();
+}
+
+async function ticketsLaden() {
+  try {
+    const seiten = [];
+    let nach = null;
+    for (let seite = 0; seite < DASHBOARD_HOECHSTENS_SEITEN; seite++) {
+      const antwort = await github("projektStatus", { nach });
+      const fehler = projektFehler(antwort);
+      if (fehler) return kachelFehler("tickets", fehler);
+      seiten.push(antwort);
+      const info = antwort.data.organization.projectV2.items.pageInfo;
+      if (!info.hasNextPage) break;
+      nach = info.endCursor;
+    }
+    const { spalten, gesamt } = ticketsZaehlen(seiten);
+    kachelSetzen("tickets",
+      element("ul", { klasse: "status-liste" }, ...spalten.map(([name, zahl]) =>
+        element("li", { "data-status": name }, element("span", { klasse: "zahl", text: String(zahl) }),
+          element("span", { klasse: "name", text: name })))),
+      element("p", { klasse: "hinweis", text: gesamt + " Tickets insgesamt (ohne Pull Requests)" }));
+  } catch (fehler) {
+    kachelFehler("tickets", fehler.message);
+  }
+}
+
+async function versionenLaden() {
+  const zeilen = element("dl");
+  for (const branch of ["develop", "main"]) {
+    let wert;
+    try {
+      wert = versionAusPaket(await github("paketVersion", { ref: branch })) || "nicht lesbar";
+    } catch (fehler) {
+      wert = fehler.message;
+    }
+    zeilen.append(element("dt", { text: branch }), element("dd", { "data-branch": branch, text: wert }));
+  }
+  kachelSetzen("version", zeilen);
+}
+
+$("dashboard-laden").addEventListener("click", function () {
+  dashboardSupabaseLaden();
+  dashboardGithubLaden();
 });
 
 // --- Meldungen ---------------------------------------------------------------------------
@@ -581,6 +672,7 @@ async function githubVerbinden() {
     workflowsAnzeigen();
     prsLaden();
     mainBereichLaden();
+    dashboardGithubLaden();
     // Wollte die Admin eigentlich woanders hin, geht es jetzt dorthin.
     if (nachDemVerbinden) {
       const ziel = nachDemVerbinden;
@@ -592,6 +684,7 @@ async function githubVerbinden() {
   } catch (fehler) {
     githubTrennen();
     $("github-stand").textContent = "Nicht verbunden: " + fehler.message;
+    dashboardGithubLaden();
     statusZeigen(fehler.message, true);
   }
 }

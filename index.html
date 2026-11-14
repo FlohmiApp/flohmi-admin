@@ -49,6 +49,37 @@
       <div class="inhalt">
         <a id="zurueck" class="zurueck" href="#">← Menü</a>
 
+        <!-- Ticket #139: Kennzahlen auf einen Blick. Jede Kachel lädt für sich; schlägt eine
+             fehl, zeigt nur sie eine Meldung. -->
+        <section id="bereich-dashboard" class="karte bereich" data-bereich="dashboard" aria-labelledby="dashboard-titel" hidden>
+          <div class="zeile">
+            <h2 id="dashboard-titel">📊 Dashboard</h2>
+            <button id="dashboard-laden" class="knopf knopf-leise" type="button">Neu laden</button>
+          </div>
+          <div class="kacheln">
+            <article class="kachel kachel-breit" data-kennzahl="tickets" aria-labelledby="kachel-tickets">
+              <h3 id="kachel-tickets">🎫 Tickets im Board</h3>
+              <div class="kachel-inhalt"><p class="hinweis">Lädt …</p></div>
+            </article>
+            <article class="kachel" data-kennzahl="version" aria-labelledby="kachel-version">
+              <h3 id="kachel-version">🏷️ Version</h3>
+              <div class="kachel-inhalt"><p class="hinweis">Lädt …</p></div>
+            </article>
+            <article class="kachel" data-kennzahl="meldungen" aria-labelledby="kachel-meldungen">
+              <h3 id="kachel-meldungen">📋 Märkte zur Freigabe</h3>
+              <div class="kachel-inhalt"><p class="hinweis">Lädt …</p></div>
+            </article>
+            <article class="kachel" data-kennzahl="tester" aria-labelledby="kachel-tester">
+              <h3 id="kachel-tester">🧪 Tester</h3>
+              <div class="kachel-inhalt"><p class="hinweis">Lädt …</p></div>
+            </article>
+            <article class="kachel" data-kennzahl="nutzer" aria-labelledby="kachel-nutzer">
+              <h3 id="kachel-nutzer">👥 Registrierte User</h3>
+              <div class="kachel-inhalt"><p class="hinweis">Lädt …</p></div>
+            </article>
+          </div>
+        </section>
+
         <section id="bereich-meldungen" class="karte bereich" data-bereich="meldungen" aria-labelledby="meldungen-titel" hidden>
           <div class="zeile">
             <h2 id="meldungen-titel">📋 Offene Meldungen</h2>

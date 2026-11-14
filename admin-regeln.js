@@ -32,6 +32,10 @@ const STARTBARE_WORKFLOWS = [
 // bereich: Ziel in der Adresse (#meldungen, #workflow:sammeln.yml …); github: braucht die
 // GitHub-Verbindung; aktion: kein Bereich, sondern ein Knopf (Abmelden).
 const MENUE_GRUPPEN = [
+  // Ticket #139: Dashboard als Einstieg (am PC Startbereich, am Handy oben im Menü).
+  { id: "uebersicht", titel: "Übersicht", symbol: "🏠", eintraege: [
+    { bereich: "dashboard", titel: "Dashboard", symbol: "📊" }
+  ] },
   { id: "maerkte", titel: "Märkte", symbol: "🛍️", eintraege: [
     { bereich: "meldungen", titel: "Offene Meldungen", symbol: "📋" }
   ] },
@@ -51,7 +55,7 @@ const MENUE_GRUPPEN = [
     { aktion: "abmelden", titel: "Abmelden", symbol: "🚪" }
   ] }
 ];
-const START_BEREICH = "meldungen";
+const START_BEREICH = "dashboard";
 
 // Das fertige Menü: Gruppen mit ihren Einträgen; die Workflows stehen in ihrer Gruppe
 // jeweils nach den festen Einträgen.
@@ -291,6 +295,63 @@ function testerAnzahlText(anzahl) {
   return anzahl === 1 ? "1 Person" : anzahl + " Personen";
 }
 
+// --- Dashboard (Ticket #139) -------------------------------------------------------------
+// Kennzahlen als Kacheln. Zahlen aus Supabase kommen von der Funktion admin_kennzahlen
+// (Migration 20261114150000_admin_kennzahlen.sql), GitHub-Zahlen über die Edge Function.
+
+const DASHBOARD_HOECHSTENS_SEITEN = 20; // 20 × 100 Einträge im Board reichen lange
+
+// Zählt die Tickets einer oder mehrerer Seiten der Board-Abfrage (GraphQL) nach Status.
+// Pull Requests zählen nicht mit, Tickets und Entwürfe schon. Gibt { spalten: [[Name, Anzahl]],
+// gesamt } zurück; Spalten in der Reihenfolge des Boards, „ohne Status“ am Ende, falls es welche gibt.
+function ticketsZaehlen(seiten) {
+  let reihenfolge = [];
+  const anzahl = new Map();
+  for (const seite of seiten || []) {
+    const projekt = seite && seite.data && seite.data.organization && seite.data.organization.projectV2;
+    if (!projekt) continue;
+    const optionen = projekt.field && projekt.field.options;
+    if (optionen && reihenfolge.length === 0) reihenfolge = optionen.map((o) => o.name);
+    for (const eintrag of projekt.items.nodes) {
+      if (!eintrag || (eintrag.content && eintrag.content.__typename === "PullRequest")) continue;
+      const status = (eintrag.fieldValueByName && eintrag.fieldValueByName.name) || "ohne Status";
+      anzahl.set(status, (anzahl.get(status) || 0) + 1);
+    }
+  }
+  const namen = reihenfolge.concat([...anzahl.keys()].filter((name) => !reihenfolge.includes(name)));
+  const spalten = namen.map((name) => [name, anzahl.get(name) || 0]);
+  return { spalten, gesamt: spalten.reduce((summe, [, zahl]) => summe + zahl, 0) };
+}
+
+// Fehler einer GraphQL-Antwort (GitHub antwortet dann trotzdem mit 200) als verständlicher Satz,
+// sonst "".
+function projektFehler(seite) {
+  const fehler = seite && seite.errors && seite.errors[0];
+  if (!fehler) {
+    if (seite && seite.data && seite.data.organization && seite.data.organization.projectV2) return "";
+    return "Das Board wurde nicht gefunden.";
+  }
+  if (/not accessible|permission|scope/i.test(fehler.message || "") || fehler.type === "FORBIDDEN") {
+    return "Das GitHub-Token in Supabase darf das Board nicht lesen (nötig: Organization permissions → Projects: Read-only).";
+  }
+  return "GitHub meldet: " + (fehler.message || "unbekannter Fehler");
+}
+
+// Version aus dem Inhalt von package.json, sonst null.
+function versionAusPaket(text) {
+  try {
+    const version = JSON.parse(String(text)).version;
+    return /^\d+\.\d+\.\d+$/.test(version) ? version : null;
+  } catch (fehler) {
+    return null;
+  }
+}
+
+// Zahl für eine Kachel: ganze Zahl ≥ 0, sonst null (dann zeigt die Kachel einen Fehler).
+function kennzahl(wert) {
+  return Number.isInteger(wert) && wert >= 0 ? wert : null;
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     ADMIN_REPO, GITHUB_FUNKTION, STARTBARE_WORKFLOWS, MELDUNG_SPALTEN,
@@ -299,6 +360,7 @@ if (typeof module !== "undefined") {
     DIENST_SPALTEN, DIENST_FELDER, GEHEIMNIS_MUSTER, dienstPruefen, naechsteReihenfolge, dienstUnvollstaendig,
     TESTER_SPALTEN, TESTER_FELDER, testerPruefen, testerMails, testerAnzahlText,
     proxyFehlerText, githubFehlerText, prZustand, laufText, mergeFrage,
-    meldungZeilen, freigabePruefen
+    meldungZeilen, freigabePruefen,
+    DASHBOARD_HOECHSTENS_SEITEN, ticketsZaehlen, projektFehler, versionAusPaket, kennzahl
   };
 }
