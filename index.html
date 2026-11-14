@@ -175,17 +175,12 @@
         <section id="bereich-github" class="karte bereich" data-bereich="github" aria-labelledby="github-titel" hidden>
           <h2 id="github-titel">🔗 GitHub-Verbindung</h2>
           <p id="github-hinweis" class="hinweis-kasten" hidden></p>
-          <form id="token-formular" novalidate>
-            <p>Für Workflows und Merges brauchst du ein GitHub-Token. Es bleibt nur in diesem
-              Browser-Tab und ist beim Schließen weg.</p>
-            <label for="token">GitHub-Token</label>
-            <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
-            <button class="knopf" type="submit">Verbinden</button>
-          </form>
-          <div id="github-bereich" hidden>
-            <p id="github-nutzer"></p>
-            <button id="token-vergessen" class="knopf knopf-leise" type="button">Token vergessen</button>
-          </div>
+          <!-- Ticket #137: kein Token mehr im Browser. Die Seite fragt die Supabase Edge Function
+               „github“; das GitHub-Token liegt nur dort als Secret. -->
+          <p>Workflows, Merges und Architekturbilder laufen über Supabase. Du musst kein Token eingeben:
+            Das GitHub-Token liegt nur in Supabase, und nur angemeldete Admins können es nutzen.</p>
+          <p id="github-stand" role="status">Nicht verbunden.</p>
+          <button id="github-pruefen" class="knopf knopf-leise" type="button">Verbindung erneut prüfen</button>
         </section>
       </div>
     </div>

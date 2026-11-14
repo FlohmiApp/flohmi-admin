@@ -1,13 +1,13 @@
 // Reine Logik der Admin-Seite (Ticket #43), ohne Seite und ohne Netz, damit sie getestet
 // werden kann. Angezeigt wird in admin.js. Anleitung: doku/ANLEITUNG-ADMIN.md
 //
-// GitHub: Die Seite spricht direkt mit der GitHub-API (sie erlaubt Anfragen aus dem Browser).
-// Das Token gibt die Admin selbst ein; es bleibt nur in diesem Browser-Tab (sessionStorage)
-// und ist beim Schließen des Tabs weg. Es steht nie im Code.
+// GitHub (Ticket #137): Die Seite spricht nicht selbst mit GitHub, sondern mit der Supabase
+// Edge Function „github“ (supabase/functions/github/). Sie schickt nur { art, werte } und das
+// Zugangs-Token ihrer Supabase-Anmeldung. Das GitHub-Token liegt nur in Supabase (Secret
+// FLOHMI_GITHUB_TOKEN), nie im Browser und nie im Code.
 
 const ADMIN_REPO = "FlohmiApp/Flohmi";
-const GITHUB_API = "https://api.github.com";
-const TOKEN_SPEICHER = "flohmi-admin-github";
+const GITHUB_FUNKTION = "github";
 
 // Workflows mit „Run workflow“ (workflow_dispatch). Alle laufen nur auf main.
 // Ein Test prüft, dass die Liste zu .github/workflows/ passt. gruppe: wo er im Menü steht.
@@ -21,6 +21,8 @@ const STARTBARE_WORKFLOWS = [
     text: "Baut die öffentlichen Seiten zu Datenschutz, Impressum und „Konto löschen“ neu." },
   { datei: "supabase-migrationen.yml", titel: "Datenbank-Migrationen", gruppe: "wartung", symbol: "🗄️",
     text: "Überträgt neue Datenbank-Änderungen aus supabase/migrations." },
+  { datei: "supabase-funktionen.yml", titel: "Edge Functions übertragen", gruppe: "wartung", symbol: "⚡",
+    text: "Überträgt die Edge Function „github“ nach Supabase (läuft sonst nach Änderungen auf main)." },
   { datei: "tag-nach-merge.yml", titel: "Tag und Release nachholen", gruppe: "wartung", symbol: "🏷️",
     text: "Setzt Tag und Release für den letzten Merge nach main, falls sie fehlen." }
 ];
@@ -74,56 +76,29 @@ function bereichAusAdresse(adresse) {
   return menueBereiche().find((eintrag) => eintrag.bereich === name) || null;
 }
 
-// Ein GitHub-Token hat eines dieser Formate (fein abgestuft, klassisch, OAuth).
-function tokenPruefen(token) {
-  const wert = String(token || "").trim();
-  if (!wert) return "Bitte ein GitHub-Token eingeben.";
-  if (!/^(github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,})$/.test(wert)) {
-    return "Das sieht nicht wie ein GitHub-Token aus (beginnt mit github_pat_ oder ghp_).";
+// Übersetzt die Fehlerantwort der Edge Function „github“ in einen verständlichen Satz.
+// status: HTTP-Status der Funktion (0 = keine Verbindung), inhalt: ihre Antwort { fehler, … }.
+function proxyFehlerText(status, inhalt) {
+  const fehler = (inhalt && inhalt.fehler) || "";
+  if (!status) return "Keine Verbindung zu Supabase. Bitte Internet prüfen.";
+  if (fehler === "github") return githubFehlerText(inhalt.status, inhalt.nachricht);
+  if (status === 401 || fehler === "nicht_angemeldet") return "Deine Anmeldung ist abgelaufen. Bitte abmelden und neu anmelden.";
+  if (fehler === "kein_admin") return "Dieses Konto ist nicht als Admin eingetragen.";
+  if (fehler === "nicht_eingerichtet") {
+    return "Der GitHub-Zugang ist in Supabase noch nicht eingerichtet (Secret FLOHMI_GITHUB_TOKEN fehlt, siehe doku/ANLEITUNG-ADMIN.md).";
   }
-  return "";
+  if (fehler === "ungueltig") return "Diese Aktion ist nicht erlaubt: " + (inhalt.nachricht || "ungültige Anfrage");
+  if (status === 404) return "Die Edge Function „github“ ist noch nicht in Supabase (Workflow „Edge Functions übertragen“ starten).";
+  return "Supabase meldet Fehler " + status + ".";
 }
 
-// Beschreibt eine Anfrage an die GitHub-API: { methode, adresse, daten }.
-function githubAnfrage(art, werte = {}) {
-  const repo = GITHUB_API + "/repos/" + ADMIN_REPO;
-  switch (art) {
-    case "ich": return { methode: "GET", adresse: GITHUB_API + "/user" };
-    case "repo": return { methode: "GET", adresse: repo };
-    case "workflowStarten":
-      return { methode: "POST", adresse: repo + "/actions/workflows/" + encodeURIComponent(werte.datei) + "/dispatches",
-        daten: { ref: "main" } };
-    case "letzteLaeufe":
-      return { methode: "GET", adresse: repo + "/actions/workflows/" + encodeURIComponent(werte.datei) + "/runs?per_page=3" };
-    case "offenePrs":
-      return { methode: "GET", adresse: repo + "/pulls?state=open&base=" + encodeURIComponent(werte.basis) + "&per_page=50" };
-    case "pr": return { methode: "GET", adresse: repo + "/pulls/" + Number(werte.nummer) };
-    case "prMergen":
-      // „merge“ (kein Squash): So erkennt tag-nach-merge.yml den Merge develop → main.
-      return { methode: "PUT", adresse: repo + "/pulls/" + Number(werte.nummer) + "/merge",
-        daten: { merge_method: "merge", sha: werte.sha } };
-    case "vergleich":
-      return { methode: "GET", adresse: repo + "/compare/" + encodeURIComponent(werte.basis) + "..." + encodeURIComponent(werte.kopf) };
-    case "datei":
-      // Rohinhalt einer Datei aus dem (privaten) Repository, z. B. ein Architekturbild.
-      return { methode: "GET", roh: true,
-        adresse: repo + "/contents/" + String(werte.pfad).split("/").map(encodeURIComponent).join("/") +
-          "?ref=" + encodeURIComponent(werte.ref) };
-    case "prAnlegen":
-      return { methode: "POST", adresse: repo + "/pulls",
-        daten: { title: werte.titel, head: werte.kopf, base: werte.basis, body: werte.text || "" } };
-    default:
-      throw new Error("Unbekannte Anfrage: " + art);
-  }
-}
-
-// Übersetzt eine Fehlerantwort von GitHub in einen verständlichen Satz.
+// Übersetzt eine Fehlerantwort von GitHub (über die Edge Function) in einen verständlichen Satz.
 function githubFehlerText(status, nachricht) {
   const text = String(nachricht || "");
-  if (status === 401) return "Das GitHub-Token ist ungültig oder abgelaufen. Bitte neu eingeben.";
+  if (status === 401) return "Das GitHub-Token in Supabase ist ungültig oder abgelaufen. Bitte erneuern (doku/ANLEITUNG-ADMIN.md).";
   if (status === 403 && /rate limit/i.test(text)) return "GitHub hat zu viele Anfragen gezählt. Bitte in ein paar Minuten noch einmal.";
-  if (status === 403) return "Das GitHub-Token hat dafür keine Rechte (nötig: Contents, Pull requests und Actions mit Schreibrechten).";
-  if (status === 404) return "Nicht gefunden. Hat das Token Zugriff auf " + ADMIN_REPO + "?";
+  if (status === 403) return "Das GitHub-Token in Supabase hat dafür keine Rechte (nötig: Contents, Pull requests und Actions mit Schreibrechten).";
+  if (status === 404) return "Nicht gefunden. Hat das GitHub-Token in Supabase Zugriff auf " + ADMIN_REPO + "?";
   if (status === 405) return "Der Pull Request lässt sich nicht mergen: " + (text || "Prüfungen oder Freigaben fehlen.");
   if (status === 409) return "Konflikt: Der Pull Request hat Merge-Konflikte oder wurde inzwischen geändert. Seite neu laden und prüfen.";
   if (status === 422 && /workflow_dispatch/i.test(text)) return "Dieser Workflow lässt sich nicht von Hand starten.";
@@ -318,12 +293,12 @@ function testerAnzahlText(anzahl) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    ADMIN_REPO, GITHUB_API, TOKEN_SPEICHER, STARTBARE_WORKFLOWS, MELDUNG_SPALTEN,
+    ADMIN_REPO, GITHUB_FUNKTION, STARTBARE_WORKFLOWS, MELDUNG_SPALTEN,
     MENUE_GRUPPEN, START_BEREICH, adminMenue, menueBereiche, bereichAusAdresse,
     ARCHITEKTUR_BRANCH, ARCHITEKTUR_BILDER, ARCHITEKTUR_ERKLAERUNG, ZOOM_STUFEN, githubDateiLink, zoomAendern, zoomText,
     DIENST_SPALTEN, DIENST_FELDER, GEHEIMNIS_MUSTER, dienstPruefen, naechsteReihenfolge, dienstUnvollstaendig,
     TESTER_SPALTEN, TESTER_FELDER, testerPruefen, testerMails, testerAnzahlText,
-    tokenPruefen, githubAnfrage, githubFehlerText, prZustand, laufText, mergeFrage,
+    proxyFehlerText, githubFehlerText, prZustand, laufText, mergeFrage,
     meldungZeilen, freigabePruefen
   };
 }

@@ -4,7 +4,8 @@
 // Schutz: Die Seite selbst ist öffentlich, ihr Code enthält keine Geheimnisse.
 // - Meldungen lesen und freigeben erlaubt Supabase nur Konten aus der Tabelle „admins“
 //   (Regeln in supabase/migrations/20261112170000_admins.sql).
-// - Für GitHub braucht es ein Token, das die Admin selbst eingibt (nur im Browser-Tab).
+// - GitHub geht über die Supabase Edge Function „github“ (Ticket #137): Sie prüft Anmeldung und
+//   Admin-Recht und nutzt ein Token, das nur in Supabase liegt. Im Browser liegt kein GitHub-Token.
 // Texte aus Meldungen kommen von fremden Personen und werden nur als Text eingesetzt (nie als HTML).
 //
 // Navigation: Jeder Bereich hat eine Adresse (#meldungen, #prs, #workflow:sammeln.yml …).
@@ -17,7 +18,6 @@ const client = supabase.createClient(SUPABASE_URL, SUPABASE_SCHLUESSEL, {
 
 const $ = (id) => document.getElementById(id);
 let anmeldeEmail = "";
-let githubToken = "";
 let githubVerbunden = false;
 let istAdminAngemeldet = false;
 // Bereich, zu dem es nach dem Verbinden mit GitHub weitergehen soll.
@@ -99,7 +99,8 @@ function bereichZeigen() {
   $("github-hinweis").hidden = true;
   if (eintrag.github && !githubVerbunden) {
     nachDemVerbinden = eintrag.bereich;
-    $("github-hinweis").textContent = "Für „" + eintrag.titel + "“ brauchst du zuerst die GitHub-Verbindung.";
+    $("github-hinweis").textContent = "„" + eintrag.titel + "“ braucht die GitHub-Verbindung. " +
+      "Sie wird gerade geprüft oder ist noch nicht eingerichtet.";
     $("github-hinweis").hidden = false;
     ziel = bereichAusAdresse("#github");
   }
@@ -164,7 +165,7 @@ $("code-formular").addEventListener("submit", async function (ereignis) {
 
 async function abmelden() {
   await client.auth.signOut();
-  tokenVergessen();
+  githubTrennen();
   // Personenbezogene Daten (Ticket #122) nicht im ausgeblendeten Teil der Seite lassen.
   tester = [];
   $("tester-liste").replaceChildren();
@@ -196,7 +197,7 @@ async function anmeldungAnzeigen(sitzung) {
   meldungenLaden();
   diensteLaden();
   testerLaden();
-  tokenAusSpeicher();
+  githubVerbinden();
 }
 
 client.auth.onAuthStateChange(function (ereignis, sitzung) {
@@ -261,7 +262,7 @@ async function statusSetzen(meldung, status, knopf, eintrag) {
 $("meldungen-laden").addEventListener("click", meldungenLaden);
 
 // --- Architektur und Workflows (Ticket #113) ----------------------------------------------
-// Die Bilder kommen mit dem GitHub-Token aus dem privaten Repository. Angezeigt werden sie als
+// Die Bilder kommen über die Edge Function „github“ aus dem privaten Repository. Angezeigt werden sie als
 // <img> mit einer Blob-Adresse: So läuft im SVG kein Code, und Zoom geht über die Breite.
 
 const architekturCache = new Map();
@@ -526,75 +527,55 @@ $("tester-mails-kopieren").addEventListener("click", async function () {
 
 // --- GitHub ------------------------------------------------------------------------------
 
-async function github(art, werte) {
-  const anfrage = githubAnfrage(art, werte);
+// Eine GitHub-Aktion über die Edge Function „github“ (Ticket #137). Mitgeschickt wird nur,
+// was passieren soll ({ art, werte }) und das Zugangs-Token der Supabase-Anmeldung.
+async function github(art, werte = {}) {
+  const { data } = await client.auth.getSession();
+  const sitzung = data && data.session;
+  if (!sitzung) throw new Error(proxyFehlerText(401, { fehler: "nicht_angemeldet" }));
   let antwort;
   try {
-    antwort = await fetch(anfrage.adresse, {
-      method: anfrage.methode,
+    antwort = await fetch(SUPABASE_URL + "/functions/v1/" + GITHUB_FUNKTION, {
+      method: "POST",
       headers: {
-        // „raw“: Dateiinhalt direkt statt JSON (Architekturbilder, Ticket #113).
-        "Accept": anfrage.roh ? "application/vnd.github.raw" : "application/vnd.github+json",
-        "Authorization": "Bearer " + githubToken,
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...(anfrage.daten ? { "Content-Type": "application/json" } : {})
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_SCHLUESSEL,
+        "Authorization": "Bearer " + sitzung.access_token
       },
-      body: anfrage.daten ? JSON.stringify(anfrage.daten) : undefined
+      body: JSON.stringify({ art, werte })
     });
   } catch (fehler) {
-    throw new Error(githubFehlerText(0));
+    throw new Error(proxyFehlerText(0));
   }
-  if (!antwort.ok) {
-    let nachricht = "";
-    try { nachricht = (await antwort.json()).message; } catch (fehler) { /* keine Details */ }
-    throw new Error(githubFehlerText(antwort.status, nachricht));
-  }
-  if (anfrage.roh) return antwort.text();
-  return antwort.status === 204 ? null : antwort.json();
+  let inhalt = null;
+  try { inhalt = await antwort.json(); } catch (fehler) { /* keine Details */ }
+  if (!antwort.ok) throw new Error(proxyFehlerText(antwort.status, inhalt));
+  return inhalt ? inhalt.daten : null;
 }
 
-function tokenAusSpeicher() {
-  try { githubToken = sessionStorage.getItem(TOKEN_SPEICHER) || ""; } catch (fehler) { githubToken = ""; }
-  if (githubToken) githubVerbinden();
-}
-
-function tokenVergessen() {
-  githubToken = "";
+function githubTrennen() {
   githubVerbunden = false;
-  try { sessionStorage.removeItem(TOKEN_SPEICHER); } catch (fehler) { /* egal */ }
-  $("github-bereich").hidden = true;
-  $("token-formular").hidden = false;
+  $("github-stand").textContent = "Nicht verbunden.";
   for (const bereich of ["prs", "main"]) zaehlerSetzen(bereich, null);
-  // Mit dem Token geholte Bilder (Ticket #113) wieder vergessen.
+  // Über GitHub geholte Bilder (Ticket #113) wieder vergessen.
   for (const adresse of architekturCache.values()) URL.revokeObjectURL(adresse);
   architekturCache.clear();
   $("architektur-bild").removeAttribute("src");
   $("architektur-bild").hidden = true;
 }
 
-$("token-formular").addEventListener("submit", async function (ereignis) {
-  ereignis.preventDefault();
-  const token = this.elements.token.value.trim();
-  const fehler = tokenPruefen(token);
-  if (fehler) return statusZeigen(fehler, true);
-  githubToken = token;
-  this.elements.token.value = "";
-  await beschaeftigt(this.querySelector("button"), githubVerbinden);
-});
+$("github-pruefen").addEventListener("click", (e) => beschaeftigt(e.currentTarget, githubVerbinden));
 
-$("token-vergessen").addEventListener("click", () => { tokenVergessen(); statusZeigen("Token vergessen."); });
-
+// Prüft nach der Anmeldung von selbst, ob die Edge Function GitHub erreicht und schreiben darf.
 async function githubVerbinden() {
+  $("github-stand").textContent = "Prüfe die Verbindung …";
   try {
     const [nutzer, repo] = await Promise.all([github("ich"), github("repo")]);
     if (!repo.permissions || !repo.permissions.push) {
-      throw new Error("Das Konto " + nutzer.login + " darf in " + ADMIN_REPO + " nicht schreiben.");
+      throw new Error("Das GitHub-Token in Supabase (Konto " + nutzer.login + ") darf in " + ADMIN_REPO + " nicht schreiben.");
     }
-    try { sessionStorage.setItem(TOKEN_SPEICHER, githubToken); } catch (fehler) { /* dann nur bis zum Neuladen */ }
     githubVerbunden = true;
-    $("github-nutzer").textContent = "Verbunden als " + nutzer.login + " mit " + ADMIN_REPO + ".";
-    $("token-formular").hidden = true;
-    $("github-bereich").hidden = false;
+    $("github-stand").textContent = "Verbunden mit " + ADMIN_REPO + " über Supabase (Token von " + nutzer.login + ").";
     $("github-hinweis").hidden = true;
     statusZeigen("");
     workflowsAnzeigen();
@@ -609,7 +590,8 @@ async function githubVerbinden() {
       bereichZeigen();
     }
   } catch (fehler) {
-    tokenVergessen();
+    githubTrennen();
+    $("github-stand").textContent = "Nicht verbunden: " + fehler.message;
     statusZeigen(fehler.message, true);
   }
 }
