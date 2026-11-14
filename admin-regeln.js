@@ -5,7 +5,7 @@
 // Das Token gibt die Admin selbst ein; es bleibt nur in diesem Browser-Tab (sessionStorage)
 // und ist beim Schließen des Tabs weg. Es steht nie im Code.
 
-const ADMIN_REPO = "sarahschwarz0803-spec/Flohmi";
+const ADMIN_REPO = "FlohmiApp/Flohmi";
 const GITHUB_API = "https://api.github.com";
 const TOKEN_SPEICHER = "flohmi-admin-github";
 
@@ -14,8 +14,9 @@ const TOKEN_SPEICHER = "flohmi-admin-github";
 const STARTBARE_WORKFLOWS = [
   { datei: "sammeln.yml", titel: "Märkte sammeln", gruppe: "maerkte", symbol: "🔄",
     text: "Holt neue Märkte und übernimmt freigegebene Meldungen in die App (läuft sonst alle 3 Stunden)." },
-  { datei: "play-store-build.yml", titel: "App Bundle für Google Play", gruppe: "veroeffentlichen", symbol: "📦",
-    text: "Baut das signierte App Bundle, wenn es zum Stand auf main ein Release gibt." },
+  { datei: "play-store-build.yml", titel: "App Bundle erstellen und hochladen", gruppe: "veroeffentlichen", symbol: "📦",
+    text: "Baut das signierte App Bundle, wenn es zum Stand auf main ein Release gibt, und lädt es als " +
+      "Entwurf in den internen Test von Google Play (ohne Dienstkonto liegt es nur am Lauf)." },
   { datei: "rechtliches-seiten.yml", titel: "Rechtstexte veröffentlichen", gruppe: "wartung", symbol: "⚖️",
     text: "Baut die öffentlichen Seiten zu Datenschutz, Impressum und „Konto löschen“ neu." },
   { datei: "supabase-migrationen.yml", titel: "Datenbank-Migrationen", gruppe: "wartung", symbol: "🗄️",
@@ -33,9 +34,11 @@ const MENUE_GRUPPEN = [
     { bereich: "meldungen", titel: "Offene Meldungen", symbol: "📋" }
   ] },
   { id: "veroeffentlichen", titel: "Veröffentlichen", symbol: "🚀", eintraege: [
-    { bereich: "prs", titel: "Pull Requests nach develop", symbol: "🔀", github: true },
-    { bereich: "main", titel: "develop nach main", symbol: "⏫", github: true },
-    { bereich: "tester", titel: "Testerinnen und Tester", symbol: "🧪" }
+    // Ticket #127: die Schritte zum Veröffentlichen in ihrer Reihenfolge; „App Bundle erstellen
+    // und hochladen“ ist ein Workflow und kommt dahinter (STARTBARE_WORKFLOWS).
+    { bereich: "tester", titel: "Testerdatenbank", symbol: "🧪" },
+    { bereich: "prs", titel: "Änderungen in develop übernehmen", symbol: "🔀", github: true },
+    { bereich: "main", titel: "Release nach main bringen", symbol: "⏫", github: true }
   ] },
   { id: "wartung", titel: "Wartung", symbol: "🛠️", eintraege: [
     { bereich: "architektur", titel: "Architektur und Workflows", symbol: "🗺️", github: true }
