@@ -163,30 +163,65 @@ $("code-formular").addEventListener("submit", async function (ereignis) {
   });
 });
 
-async function abmelden() {
-  await client.auth.signOut();
+// Seite leeren, wenn niemand (mehr) angemeldet ist.
+function verwaltungLeeren() {
+  istAdminAngemeldet = false;
   githubTrennen();
   // Personenbezogene Daten (Ticket #122) nicht im ausgeblendeten Teil der Seite lassen.
   tester = [];
   $("tester-liste").replaceChildren();
+}
+
+// Ticket #144: nur dieses Gerät abmelden. Der Standard („global“) meldet alle Tabs und Geräte
+// ab; deren Anmeldung wird ungültig.
+async function abmelden() {
+  await client.auth.signOut({ scope: "local" });
+  verwaltungLeeren();
   history.replaceState(null, "", location.pathname + location.search);
   statusZeigen("Abgemeldet.");
 }
 $("kein-admin-abmelden").addEventListener("click", abmelden);
 
+// Ticket #144: Konto der zuletzt verarbeiteten Anmeldung (undefined = noch nichts verarbeitet)
+// und eine laufende Nummer, damit eine ältere, noch laufende Prüfung nichts mehr anzeigt.
+let verarbeitetesKonto;
+let pruefungNummer = 0;
+
+function anmeldungVerarbeiten(sitzung) {
+  const schritt = anmeldungSchritt(verarbeitetesKonto, sitzung);
+  verarbeitetesKonto = schritt.konto;
+  if (schritt.aktion === "nichts") return; // gleiche Person: kein Neuladen, keine Schleife
+  anmeldungAnzeigen(sitzung);
+}
+
 async function anmeldungAnzeigen(sitzung) {
+  const nummer = ++pruefungNummer;
   const angemeldet = Boolean(sitzung);
   istAdminAngemeldet = false;
   $("anmeldung").hidden = angemeldet;
   $("kein-admin").hidden = true;
   $("verwaltung").hidden = true;
   if (!angemeldet) {
+    verwaltungLeeren();
     $("email-formular").hidden = false;
     $("code-formular").hidden = true;
     return;
   }
-  const { data: istAdmin, error } = await client.rpc("ist_admin");
-  if (error || istAdmin !== true) {
+  const ergebnis = adminErgebnis(await client.rpc("ist_admin"));
+  if (nummer !== pruefungNummer) return; // inzwischen neu angemeldet oder abgemeldet
+  if (ergebnis === "abgelaufen") {
+    // Anmeldung ungültig (z. B. in einem anderen Tab abgemeldet): lokal abmelden und das sagen.
+    // verarbeitetesKonto zuerst auf „abgemeldet“, damit das folgende SIGNED_OUT nichts auslöst.
+    verarbeitetesKonto = null;
+    verwaltungLeeren();
+    $("anmeldung").hidden = false;
+    $("email-formular").hidden = false;
+    $("code-formular").hidden = true;
+    statusZeigen(ANMELDUNG_ABGELAUFEN, true);
+    await client.auth.signOut({ scope: "local" });
+    return;
+  }
+  if (ergebnis === "kein_admin") {
     $("kein-admin").hidden = false;
     return;
   }
@@ -203,7 +238,7 @@ async function anmeldungAnzeigen(sitzung) {
 
 client.auth.onAuthStateChange(function (ereignis, sitzung) {
   // Nicht direkt im Rückruf auf Supabase warten (sonst kann die Bibliothek hängen bleiben).
-  setTimeout(() => anmeldungAnzeigen(sitzung), 0);
+  setTimeout(() => anmeldungVerarbeiten(sitzung), 0);
 });
 
 // --- Dashboard (Ticket #139) -------------------------------------------------------------

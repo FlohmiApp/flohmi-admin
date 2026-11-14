@@ -295,6 +295,30 @@ function testerAnzahlText(anzahl) {
   return anzahl === 1 ? "1 Person" : anzahl + " Personen";
 }
 
+// --- Anmeldung (Ticket #144) -------------------------------------------------------------
+// supabase-js meldet viele Ereignisse: auch beim Auffrischen der Anmeldung (TOKEN_REFRESHED),
+// beim Tabwechsel (erneutes SIGNED_IN) und aus anderen Tabs. Neu geprüft und geladen wird nur,
+// wenn sich das angemeldete Konto wirklich ändert, sonst entsteht mit mehreren Tabs eine Schleife.
+
+// zuletzt: Konto-ID der zuletzt verarbeiteten Anmeldung (null = abgemeldet, undefined = noch nichts).
+// Gibt { aktion: "nichts" | "abgemeldet" | "pruefen", konto } zurück.
+function anmeldungSchritt(zuletzt, sitzung) {
+  const konto = (sitzung && sitzung.user && sitzung.user.id) || null;
+  if (konto === zuletzt) return { aktion: "nichts", konto };
+  return { aktion: konto ? "pruefen" : "abgemeldet", konto };
+}
+
+// Antwort von rpc("ist_admin"): "admin", "kein_admin" (wirklich false) oder "abgelaufen"
+// (Fehler, z. B. 401 bei ungültiger Anmeldung). Nur bei false heißt es „nicht als Admin eingetragen“.
+function adminErgebnis({ data, error } = {}) {
+  if (error) return "abgelaufen";
+  if (data === true) return "admin";
+  if (data === false) return "kein_admin";
+  return "abgelaufen";
+}
+
+const ANMELDUNG_ABGELAUFEN = "Deine Anmeldung ist abgelaufen. Bitte neu anmelden.";
+
 // --- Dashboard (Ticket #139) -------------------------------------------------------------
 // Kennzahlen als Kacheln. Zahlen aus Supabase kommen von der Funktion admin_kennzahlen
 // (Migration 20261114150000_admin_kennzahlen.sql), GitHub-Zahlen über die Edge Function.
@@ -313,7 +337,8 @@ function ticketsZaehlen(seiten) {
     const optionen = projekt.field && projekt.field.options;
     if (optionen && reihenfolge.length === 0) reihenfolge = optionen.map((o) => o.name);
     for (const eintrag of projekt.items.nodes) {
-      if (!eintrag || (eintrag.content && eintrag.content.__typename === "PullRequest")) continue;
+      // type: ISSUE, DRAFT_ISSUE, PULL_REQUEST oder REDACTED (Ticket #146, statt content).
+      if (!eintrag || eintrag.type === "PULL_REQUEST") continue;
       const status = (eintrag.fieldValueByName && eintrag.fieldValueByName.name) || "ohne Status";
       anzahl.set(status, (anzahl.get(status) || 0) + 1);
     }
@@ -331,10 +356,12 @@ function projektFehler(seite) {
     if (seite && seite.data && seite.data.organization && seite.data.organization.projectV2) return "";
     return "Das Board wurde nicht gefunden.";
   }
+  // Ticket #146: immer auch die Originalmeldung von GitHub zeigen, damit man sieht, was fehlt.
+  const original = " (GitHub: " + (fehler.message || "ohne Text") + ")";
   if (/not accessible|permission|scope/i.test(fehler.message || "") || fehler.type === "FORBIDDEN") {
-    return "Das GitHub-Token in Supabase darf das Board nicht lesen (nötig: Organization permissions → Projects: Read-only).";
+    return "Das GitHub-Token in Supabase darf das Board nicht lesen (nötig: Organization permissions → Projects: Read-only)." + original;
   }
-  return "GitHub meldet: " + (fehler.message || "unbekannter Fehler");
+  return "GitHub meldet einen Fehler beim Board." + original;
 }
 
 // Version aus dem Inhalt von package.json, sonst null.
@@ -361,6 +388,7 @@ if (typeof module !== "undefined") {
     TESTER_SPALTEN, TESTER_FELDER, testerPruefen, testerMails, testerAnzahlText,
     proxyFehlerText, githubFehlerText, prZustand, laufText, mergeFrage,
     meldungZeilen, freigabePruefen,
-    DASHBOARD_HOECHSTENS_SEITEN, ticketsZaehlen, projektFehler, versionAusPaket, kennzahl
+    DASHBOARD_HOECHSTENS_SEITEN, ticketsZaehlen, projektFehler, versionAusPaket, kennzahl,
+    anmeldungSchritt, adminErgebnis, ANMELDUNG_ABGELAUFEN
   };
 }
