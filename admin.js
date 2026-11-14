@@ -232,6 +232,7 @@ async function anmeldungAnzeigen(sitzung) {
   meldungenLaden();
   diensteLaden();
   testerLaden();
+  zeitplaeneLaden();
   dashboardSupabaseLaden();
   githubVerbinden();
 }
@@ -240,6 +241,105 @@ client.auth.onAuthStateChange(function (ereignis, sitzung) {
   // Nicht direkt im Rückruf auf Supabase warten (sonst kann die Bibliothek hängen bleiben).
   setTimeout(() => anmeldungVerarbeiten(sitzung), 0);
 });
+
+// --- Zeitpläne (Ticket #138) -------------------------------------------------------------
+// Tabelle admin_zeitplaene in Supabase (nur Admins). Supabase (pg_cron) startet fällige
+// Workflows selbst; hier wird nur eingestellt und angezeigt.
+
+function zeitText(datum) {
+  return datum ? new Date(datum).toLocaleString("de-DE", { timeZone: "Europe/Berlin",
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "–";
+}
+
+async function zeitplaeneLaden() {
+  const liste = $("zeitplaene-liste");
+  liste.replaceChildren(element("p", { klasse: "hinweis", text: "Lädt …" }));
+  let { data: zeilen, error } = await client.from("admin_zeitplaene").select(ZEITPLAN_SPALTEN).order("workflow");
+  if (error) {
+    liste.replaceChildren(element("p", { klasse: "warnung", text: "Zeitpläne konnten nicht geladen werden: " + error.message }));
+    return;
+  }
+  // Neue zeitgesteuerte Workflows bekommen von selbst ihren Standard-Zeitplan.
+  const fehlend = fehlendeZeitplaene(zeilen);
+  if (fehlend.length) {
+    const { error: anlegen } = await client.from("admin_zeitplaene").upsert(fehlend, { onConflict: "workflow", ignoreDuplicates: true });
+    if (anlegen) statusZeigen("Standard-Zeitplan nicht angelegt: " + anlegen.message, true);
+    else ({ data: zeilen } = await client.from("admin_zeitplaene").select(ZEITPLAN_SPALTEN).order("workflow"));
+  }
+  // Zeitgeber eingerichtet? Und wie ging der letzte automatische Start aus?
+  const { data: stand } = await client.rpc("admin_zeitplan_status");
+  const zeitgeber = $("zeitplaene-zeitgeber");
+  zeitgeber.hidden = !stand || stand.token_vorhanden;
+  zeitgeber.textContent = "Der Zeitgeber startet noch nichts: Im Supabase Vault fehlt das Secret " +
+    "„flohmi_github_token“ (siehe doku/ANLEITUNG-ADMIN.md, Zeitpläne).";
+  const laeufe = (stand && stand.laeufe) || {};
+  liste.replaceChildren(...(zeilen || []).map((zeile) => zeitplanAnzeigen(zeile, laeufe[zeile.workflow])));
+  if (!zeilen || zeilen.length === 0) liste.replaceChildren(element("p", { klasse: "hinweis", text: "Keine zeitgesteuerten Workflows." }));
+}
+
+function zeitplanAnzeigen(zeile, lauf) {
+  const workflow = STARTBARE_WORKFLOWS.find((w) => w.datei === zeile.workflow);
+  const titel = workflow ? workflow.symbol + " " + workflow.titel : zeile.workflow;
+  const id = (name) => "zeitplan-" + zeile.workflow.replace(/\W/g, "-") + "-" + name;
+  const fehlerStunden = element("p", { klasse: "feldfehler", hidden: true });
+  const fehlerMinute = element("p", { klasse: "feldfehler", hidden: true });
+  const formular = element("form", { klasse: "zeitplan-formular", novalidate: true },
+    element("label", { klasse: "schalter", for: id("aktiv") },
+      element("input", { id: id("aktiv"), name: "aktiv", type: "checkbox", checked: zeile.aktiv }), "Aktiv"),
+    element("label", { for: id("stunden") }, "Alle … Stunden",
+      element("input", { id: id("stunden"), name: "intervall_stunden", type: "number", min: "1", max: "168", step: "1",
+        inputmode: "numeric", value: String(zeile.intervall_stunden) })),
+    element("label", { for: id("minute") }, "zur Minute",
+      element("input", { id: id("minute"), name: "minute", type: "number", min: "0", max: "59", step: "1",
+        inputmode: "numeric", value: String(zeile.minute) })),
+    element("div", { klasse: "knoepfe" },
+      element("button", { klasse: "knopf", type: "submit", text: "Speichern" }),
+      element("button", { klasse: "knopf knopf-leise", type: "button", text: "Jetzt starten",
+        onclick: (e) => zeitplanJetztStarten(zeile, titel, e.currentTarget) })));
+  formular.addEventListener("submit", (ereignis) => {
+    ereignis.preventDefault();
+    zeitplanSpeichern(zeile, formular, fehlerStunden, fehlerMinute);
+  });
+  const naechster = naechsterLauf(zeile);
+  return element("article", { klasse: "eintrag", "data-zeitplan": zeile.workflow },
+    element("h3", { text: titel }),
+    element("p", { klasse: "hinweis", text: "Jetzt: " + zeitplanText(zeile) +
+      " · Nächster Lauf: " + (naechster ? zeitText(naechster) : "keiner (pausiert)") }),
+    formular, fehlerStunden, fehlerMinute,
+    element("p", { klasse: "hinweis", text: "Letzter automatischer Start: " + zeitText(zeile.zuletzt_gestartet) +
+      (zeile.zuletzt_gestartet ? " – " + laufStatusText(lauf) : "") }));
+}
+
+async function zeitplanSpeichern(zeile, formular, fehlerStunden, fehlerMinute) {
+  const { werte, fehler } = zeitplanPruefen({ aktiv: formular.elements.aktiv.checked,
+    intervall_stunden: formular.elements.intervall_stunden.value, minute: formular.elements.minute.value });
+  for (const [feld, absatz] of [["intervall_stunden", fehlerStunden], ["minute", fehlerMinute]]) {
+    absatz.textContent = fehler[feld] || "";
+    absatz.hidden = !fehler[feld];
+  }
+  if (Object.keys(fehler).length > 0) return statusZeigen("Nicht gespeichert: Bitte die Eingaben prüfen.", true);
+  await beschaeftigt(formular.querySelector("button[type=submit]"), async () => {
+    const { error } = await client.from("admin_zeitplaene")
+      .update({ ...werte, geaendert_am: new Date().toISOString() }).eq("workflow", zeile.workflow);
+    if (error) return statusZeigen("Nicht gespeichert: " + error.message, true);
+    statusZeigen("Zeitplan gespeichert: " + zeitplanText(werte) + ".");
+    zeitplaeneLaden();
+  });
+}
+
+async function zeitplanJetztStarten(zeile, titel, knopf) {
+  if (!window.confirm("„" + titel + "“ jetzt starten (auf main)?")) return;
+  await beschaeftigt(knopf, async () => {
+    try {
+      await github("workflowStarten", { datei: zeile.workflow });
+      statusZeigen("„" + titel + "“ gestartet. Ergebnis unter Actions bei GitHub.");
+    } catch (fehler) {
+      statusZeigen("Nicht gestartet: " + fehler.message, true);
+    }
+  });
+}
+
+$("zeitplaene-laden").addEventListener("click", zeitplaeneLaden);
 
 // --- Dashboard (Ticket #139) -------------------------------------------------------------
 // Jede Kachel lädt für sich. Schlägt eine fehl, zeigt nur sie eine Meldung.

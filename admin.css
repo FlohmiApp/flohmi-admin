@@ -153,6 +153,13 @@ input {
 .status-liste .zahl { font-size: 1.5rem; }
 .status-liste .name { display: block; color: var(--color-text-muted); font-size: 0.85rem; }
 
+/* Zeitpläne (Ticket #138) */
+.zeitplan-formular { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; margin: 8px 0; }
+.zeitplan-formular label { display: grid; gap: 4px; font-size: 0.9rem; }
+.zeitplan-formular input[type=number] { width: 6em; }
+.zeitplan-formular .schalter { display: flex; align-items: center; gap: 6px; }
+.zeitplan-formular .knoepfe { display: flex; flex-wrap: wrap; gap: 8px; }
+
 /* Testerinnen und Tester (Ticket #122): Tabelle, am Handy seitlich verschiebbar */
 .tabelle-rahmen { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .tester-tabelle { width: 100%; border-collapse: collapse; }

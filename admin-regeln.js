@@ -12,8 +12,11 @@ const GITHUB_FUNKTION = "github";
 // Workflows mit „Run workflow“ (workflow_dispatch). Alle laufen nur auf main.
 // Ein Test prüft, dass die Liste zu .github/workflows/ passt. gruppe: wo er im Menü steht.
 const STARTBARE_WORKFLOWS = [
+  // zeitplan: Standard-Zeitplan für zeitgesteuerte Workflows (Ticket #138). Muss zur Zeile
+  // „# flohmi-zeitplan: …“ in der Workflow-Datei passen (ein Test prüft das).
   { datei: "sammeln.yml", titel: "Märkte sammeln", gruppe: "maerkte", symbol: "🔄",
-    text: "Holt neue Märkte und übernimmt freigegebene Meldungen in die App (läuft sonst alle 3 Stunden)." },
+    zeitplan: { stunden: 3, minute: 7 },
+    text: "Holt neue Märkte und übernimmt freigegebene Meldungen in die App (läuft sonst nach Zeitplan, siehe „Zeitpläne“)." },
   { datei: "play-store-build.yml", titel: "App Bundle erstellen und hochladen", gruppe: "veroeffentlichen", symbol: "📦",
     text: "Baut das signierte App Bundle, wenn es zum Stand auf main ein Release gibt, und lädt es als " +
       "Entwurf in den internen Test von Google Play (ohne Dienstkonto liegt es nur am Lauf)." },
@@ -47,7 +50,8 @@ const MENUE_GRUPPEN = [
     { bereich: "main", titel: "Release nach main bringen", symbol: "⏫", github: true }
   ] },
   { id: "wartung", titel: "Wartung", symbol: "🛠️", eintraege: [
-    { bereich: "architektur", titel: "Architektur und Workflows", symbol: "🗺️", github: true }
+    { bereich: "architektur", titel: "Architektur und Workflows", symbol: "🗺️", github: true },
+    { bereich: "zeitplaene", titel: "Zeitpläne", symbol: "⏰" }
   ] },
   { id: "verbindung", titel: "Verbindung", symbol: "🔑", eintraege: [
     { bereich: "dienste", titel: "Dienste und Zugänge", symbol: "🧰" },
@@ -319,6 +323,79 @@ function adminErgebnis({ data, error } = {}) {
 
 const ANMELDUNG_ABGELAUFEN = "Deine Anmeldung ist abgelaufen. Bitte neu anmelden.";
 
+// --- Zeitpläne (Ticket #138) -------------------------------------------------------------
+// Tabelle admin_zeitplaene (Migration 20261114170000_admin_zeitplaene.sql). Supabase (pg_cron)
+// startet fällige Workflows; hier nur Anzeige und Prüfung der Eingaben.
+
+const ZEITPLAN_SPALTEN = "workflow, aktiv, intervall_stunden, minute, zuletzt_gestartet";
+
+// Zeitgesteuerte Workflows: alle startbaren mit Standard-Zeitplan.
+function zeitgesteuerteWorkflows() {
+  return STARTBARE_WORKFLOWS.filter((w) => w.zeitplan);
+}
+
+// Bereinigt und prüft die Eingaben wie die Regeln der Tabelle. Gibt { werte, fehler } zurück.
+function zeitplanPruefen(eingabe) {
+  const fehler = {};
+  // Leere Felder sind ungültig (Number("") wäre sonst 0).
+  const zahl = (wert) => { const text = String(wert ?? "").trim(); return text === "" ? NaN : Number(text); };
+  const stunden = zahl(eingabe && eingabe.intervall_stunden);
+  const minute = zahl(eingabe && eingabe.minute);
+  if (!Number.isInteger(stunden) || stunden < 1 || stunden > 168) {
+    fehler.intervall_stunden = "Bitte eine ganze Zahl von 1 bis 168 Stunden (168 = einmal pro Woche).";
+  }
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
+    fehler.minute = "Bitte eine Minute von 0 bis 59.";
+  }
+  return { werte: { aktiv: Boolean(eingabe && eingabe.aktiv), intervall_stunden: stunden, minute }, fehler };
+}
+
+// Dieselbe Regel wie zeitplan_faellig() in der Datenbank: aktiv, Minute der Stunde erreicht und
+// seit dem letzten Start das Intervall vergangen (10 Minuten Spielraum).
+function zeitplanFaellig(zeile, zeitpunkt) {
+  if (!zeile.aktiv || zeitpunkt.getUTCMinutes() < zeile.minute) return false;
+  if (!zeile.zuletzt_gestartet) return true;
+  return zeitpunkt - new Date(zeile.zuletzt_gestartet) >= zeile.intervall_stunden * 3600000 - 10 * 60000;
+}
+
+// Wann startet Supabase den Workflow als Nächstes? Spielt den Zeitgeber nach, der alle 5 Minuten
+// schaut (zur vollen 5-Minuten-Marke). null, wenn pausiert.
+function naechsterLauf(zeile, jetzt = new Date()) {
+  if (!zeile || !zeile.aktiv) return null;
+  const takt = 5 * 60000;
+  let zeitpunkt = new Date(Math.ceil(jetzt.getTime() / takt) * takt);
+  for (let schritt = 0; schritt < 12 * 24 * 8; schritt++) { // höchstens gut eine Woche voraus
+    if (zeitplanFaellig(zeile, zeitpunkt)) return zeitpunkt;
+    zeitpunkt = new Date(zeitpunkt.getTime() + takt);
+  }
+  return null;
+}
+
+// „alle 3 Stunden, Minute 7“ / „pausiert“
+function zeitplanText(zeile) {
+  if (!zeile.aktiv) return "pausiert";
+  const stunden = zeile.intervall_stunden === 1 ? "jede Stunde" : "alle " + zeile.intervall_stunden + " Stunden";
+  return stunden + ", Minute " + zeile.minute;
+}
+
+// Zeitgesteuerte Workflows ohne Zeile in der Tabelle: werden mit ihrem Standard angelegt.
+function fehlendeZeitplaene(zeilen) {
+  const vorhanden = new Set((zeilen || []).map((z) => z.workflow));
+  return zeitgesteuerteWorkflows().filter((w) => !vorhanden.has(w.datei)).map((w) => ({
+    workflow: w.datei, aktiv: true, intervall_stunden: w.zeitplan.stunden, minute: w.zeitplan.minute
+  }));
+}
+
+// Ergebnis des letzten automatischen Starts (HTTP-Status von GitHub aus pg_net).
+function laufStatusText(lauf) {
+  if (!lauf) return "noch nicht automatisch gestartet";
+  if (lauf.status === 204) return "gestartet";
+  if (lauf.status === null || lauf.status === undefined) return lauf.fehler ? "Fehler: " + lauf.fehler : "Antwort steht noch aus";
+  if (lauf.status === 401) return "Fehler 401: Token im Vault ungültig oder abgelaufen";
+  if (lauf.status === 403 || lauf.status === 404) return "Fehler " + lauf.status + ": Token im Vault hat keine Rechte (Actions: Read and write)";
+  return "Fehler " + lauf.status;
+}
+
 // --- Dashboard (Ticket #139) -------------------------------------------------------------
 // Kennzahlen als Kacheln. Zahlen aus Supabase kommen von der Funktion admin_kennzahlen
 // (Migration 20261114150000_admin_kennzahlen.sql), GitHub-Zahlen über die Edge Function.
@@ -389,6 +466,7 @@ if (typeof module !== "undefined") {
     proxyFehlerText, githubFehlerText, prZustand, laufText, mergeFrage,
     meldungZeilen, freigabePruefen,
     DASHBOARD_HOECHSTENS_SEITEN, ticketsZaehlen, projektFehler, versionAusPaket, kennzahl,
-    anmeldungSchritt, adminErgebnis, ANMELDUNG_ABGELAUFEN
+    anmeldungSchritt, adminErgebnis, ANMELDUNG_ABGELAUFEN,
+    ZEITPLAN_SPALTEN, zeitgesteuerteWorkflows, zeitplanPruefen, zeitplanFaellig, naechsterLauf, zeitplanText, fehlendeZeitplaene, laufStatusText
   };
 }

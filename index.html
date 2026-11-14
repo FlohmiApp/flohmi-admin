@@ -86,7 +86,7 @@
             <button id="meldungen-laden" class="knopf knopf-leise" type="button">Neu laden</button>
           </div>
           <p class="hinweis">Freigegebene Meldungen erscheinen in der App nach dem nächsten Lauf von
-            „Märkte sammeln“ (alle 3 Stunden oder im Menü unter „Märkte“ von Hand starten).</p>
+            „Märkte sammeln“ (nach Zeitplan, siehe „Wartung → Zeitpläne“, oder im Menü unter „Märkte“ von Hand starten).</p>
           <div id="meldungen-liste"></div>
         </section>
 
@@ -201,6 +201,19 @@
               <tbody id="tester-liste"></tbody>
             </table>
           </div>
+        </section>
+
+        <!-- Ticket #138: Zeitpläne der zeitgesteuerten Workflows. Gespeichert in Supabase
+             (admin_zeitplaene, nur Admins); Supabase (pg_cron) startet fällige Workflows. -->
+        <section id="bereich-zeitplaene" class="karte bereich" data-bereich="zeitplaene" aria-labelledby="zeitplaene-titel" hidden>
+          <div class="zeile">
+            <h2 id="zeitplaene-titel">⏰ Zeitpläne</h2>
+            <button id="zeitplaene-laden" class="knopf knopf-leise" type="button">Neu laden</button>
+          </div>
+          <p class="hinweis">Wann die zeitgesteuerten Workflows automatisch laufen. Supabase schaut alle
+            5 Minuten nach und startet, was fällig ist. Änderungen gelten sofort, ohne Commit.</p>
+          <p id="zeitplaene-zeitgeber" class="hinweis-kasten" hidden></p>
+          <div id="zeitplaene-liste"></div>
         </section>
 
         <section id="bereich-github" class="karte bereich" data-bereich="github" aria-labelledby="github-titel" hidden>
