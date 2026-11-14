@@ -153,6 +153,16 @@ input {
 .status-liste .zahl { font-size: 1.5rem; }
 .status-liste .name { display: block; color: var(--color-text-muted); font-size: 0.85rem; }
 
+/* Token-Übersicht (Ticket #158): Ablauf farbig markiert */
+.schalter-zeile { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.eintrag.token .ablauf { font-weight: 700; }
+.eintrag.token[data-ablauf="abgelaufen"], .eintrag.token[data-ablauf="bald"] {
+  border-left: 4px solid var(--color-error);
+  padding-left: 10px;
+}
+.eintrag.token[data-ablauf="abgelaufen"] .ablauf, .eintrag.token[data-ablauf="bald"] .ablauf { color: var(--color-error); }
+.eintrag.token[data-ablauf="unbekannt"] .ablauf { color: var(--color-text-muted); font-style: italic; }
+
 /* Zeitpläne (Ticket #138) */
 .zeitplan-formular { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; margin: 8px 0; }
 .zeitplan-formular label { display: grid; gap: 4px; font-size: 0.9rem; }

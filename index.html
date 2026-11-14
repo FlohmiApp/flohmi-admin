@@ -203,6 +203,44 @@
           </div>
         </section>
 
+        <!-- Ticket #158: Welche Tokens wo liegen, wer sie nutzt, wann sie ablaufen. Nur Angaben,
+             nie die Werte. Daten in Supabase (admin_tokens, nur Admins). -->
+        <section id="bereich-tokens" class="karte bereich" data-bereich="tokens" aria-labelledby="tokens-titel" hidden>
+          <div class="zeile">
+            <h2 id="tokens-titel">🔐 Token-Übersicht</h2>
+            <button id="token-neu" class="knopf knopf-leise" type="button">+ Token hinzufügen</button>
+          </div>
+          <p class="hinweis">Welche Tokens, Schlüssel und Passwörter es gibt, wo sie hinterlegt sind, wer sie
+            nutzt und wann sie ablaufen. Nach Ablaufdatum sortiert. Hier stehen nie die Werte selbst.</p>
+          <form id="token-formular" class="dienst-formular" novalidate hidden>
+            <h3 id="token-formular-titel">Token hinzufügen</h3>
+            <label for="token-name">Name</label>
+            <input id="token-name" name="name" maxlength="100" autocomplete="off" required>
+            <p class="feldfehler" data-fehler="name" hidden></p>
+            <label for="token-zweck">Wofür</label>
+            <input id="token-zweck" name="zweck" maxlength="300" autocomplete="off">
+            <p class="feldfehler" data-fehler="zweck" hidden></p>
+            <label for="token-speicherort">Wo hinterlegt (z. B. GitHub Secrets, Supabase Vault)</label>
+            <input id="token-speicherort" name="speicherort" maxlength="200" autocomplete="off" required>
+            <p class="feldfehler" data-fehler="speicherort" hidden></p>
+            <label for="token-konsumenten">Wer nutzt es (Workflow, Edge Function …)</label>
+            <input id="token-konsumenten" name="konsumenten" maxlength="300" autocomplete="off">
+            <p class="feldfehler" data-fehler="konsumenten" hidden></p>
+            <label for="token-ablaufdatum">Läuft ab am</label>
+            <input id="token-ablaufdatum" name="ablaufdatum" type="date">
+            <p class="feldfehler" data-fehler="ablaufdatum" hidden></p>
+            <label class="schalter-zeile" for="token-nie"><input id="token-nie" name="laeuft_nie_ab" type="checkbox"> Läuft nicht ab</label>
+            <label for="token-hinweis">Hinweis</label>
+            <input id="token-hinweis" name="hinweis" maxlength="300" autocomplete="off">
+            <p class="feldfehler" data-fehler="hinweis" hidden></p>
+            <div class="knoepfe">
+              <button class="knopf" type="submit">Speichern</button>
+              <button id="token-abbrechen" class="knopf knopf-leise" type="button">Abbrechen</button>
+            </div>
+          </form>
+          <div id="tokens-liste"></div>
+        </section>
+
         <!-- Ticket #138: Zeitpläne der zeitgesteuerten Workflows. Gespeichert in Supabase
              (admin_zeitplaene, nur Admins); Supabase (pg_cron) startet fällige Workflows. -->
         <section id="bereich-zeitplaene" class="karte bereich" data-bereich="zeitplaene" aria-labelledby="zeitplaene-titel" hidden>

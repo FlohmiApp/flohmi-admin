@@ -55,6 +55,7 @@ const MENUE_GRUPPEN = [
   ] },
   { id: "verbindung", titel: "Verbindung", symbol: "🔑", eintraege: [
     { bereich: "dienste", titel: "Dienste und Zugänge", symbol: "🧰" },
+    { bereich: "tokens", titel: "Token-Übersicht", symbol: "🔐" },
     { bereich: "github", titel: "GitHub-Verbindung", symbol: "🔗" },
     { aktion: "abmelden", titel: "Abmelden", symbol: "🚪" }
   ] }
@@ -323,6 +324,78 @@ function adminErgebnis({ data, error } = {}) {
 
 const ANMELDUNG_ABGELAUFEN = "Deine Anmeldung ist abgelaufen. Bitte neu anmelden.";
 
+// --- Token-Übersicht (Ticket #158) -------------------------------------------------------
+// Tabelle admin_tokens (Migration 20261114190000_admin_tokens.sql), nur Admins. Nur Angaben zu
+// den Tokens (wo, wer, bis wann), nie die Werte; Seite und Datenbank lehnen Werte ab.
+
+const TOKEN_SPALTEN = "id, name, zweck, speicherort, konsumenten, ablaufdatum, laeuft_nie_ab, hinweis";
+const TOKEN_FELDER = {
+  name: { name: "Name", laenge: 100, pflicht: true },
+  zweck: { name: "Wofür", laenge: 300 },
+  speicherort: { name: "Wo hinterlegt", laenge: 200, pflicht: true },
+  konsumenten: { name: "Wer nutzt es", laenge: 300 },
+  hinweis: { name: "Hinweis", laenge: 300 }
+};
+const TOKEN_BALD_TAGE = 30;
+// Wie GEHEIMNIS_MUSTER, dazu Supabase-Schlüssel und JWTs (wie die Regel in der Datenbank).
+const TOKEN_WERT_MUSTER = new RegExp(GEHEIMNIS_MUSTER.source + "|sb_publishabl[e]_|eyJ[a-z0-9_-]{20}", "i");
+
+// Bereinigt und prüft die Eingaben. eingabe.ablaufdatum: "JJJJ-MM-TT" oder leer.
+function tokenPruefen(eingabe) {
+  const werte = {};
+  const fehler = {};
+  for (const [feld, regel] of Object.entries(TOKEN_FELDER)) {
+    const wert = String((eingabe && eingabe[feld]) || "").trim();
+    werte[feld] = wert || null;
+    if (regel.pflicht && !wert) fehler[feld] = "Bitte ausfüllen.";
+    else if ([...wert].length > regel.laenge) fehler[feld] = "Höchstens " + regel.laenge + " Zeichen.";
+    else if (TOKEN_WERT_MUSTER.test(wert)) fehler[feld] = "Keine Token-Werte, Schlüssel oder Passwörter eintragen, nur wo sie liegen.";
+  }
+  werte.laeuft_nie_ab = Boolean(eingabe && eingabe.laeuft_nie_ab);
+  const datum = String((eingabe && eingabe.ablaufdatum) || "").trim();
+  werte.ablaufdatum = null;
+  if (datum) {
+    const gueltig = /^\d{4}-\d{2}-\d{2}$/.test(datum) && !isNaN(new Date(datum + "T00:00:00Z")) &&
+      new Date(datum + "T00:00:00Z").toISOString().slice(0, 10) === datum;
+    if (!gueltig) fehler.ablaufdatum = "Bitte ein gültiges Datum wählen.";
+    else if (werte.laeuft_nie_ab) fehler.ablaufdatum = "Entweder ein Ablaufdatum oder „läuft nicht ab“.";
+    else werte.ablaufdatum = datum;
+  }
+  return { werte, fehler };
+}
+
+// Ganze Tage von heute bis zum Ablauf (negativ = abgelaufen), nach Kalendertagen in Berlin.
+function tageBisAblauf(ablaufdatum, heute = new Date()) {
+  const tag = new Date(heute.toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }) + "T00:00:00Z");
+  return Math.round((new Date(ablaufdatum + "T00:00:00Z") - tag) / 86400000);
+}
+
+// Zustand eines Tokens: abgelaufen, bald (≤ 30 Tage), ok, nie (läuft nicht ab), unbekannt.
+function tokenStatus(eintrag, heute = new Date()) {
+  if (eintrag.laeuft_nie_ab) return { art: "nie", text: "kein Ablauf" };
+  if (!eintrag.ablaufdatum) return { art: "unbekannt", text: "Ablauf noch eintragen" };
+  const tage = tageBisAblauf(eintrag.ablaufdatum, heute);
+  const datum = new Date(eintrag.ablaufdatum + "T00:00:00Z").toLocaleDateString("de-DE", { timeZone: "UTC" });
+  if (tage < 0) return { art: "abgelaufen", text: "abgelaufen am " + datum, tage };
+  if (tage === 0) return { art: "bald", text: "läuft heute ab (" + datum + ")", tage };
+  if (tage <= TOKEN_BALD_TAGE) return { art: "bald", text: "läuft in " + tage + (tage === 1 ? " Tag" : " Tagen") + " ab (" + datum + ")", tage };
+  return { art: "ok", text: "gültig bis " + datum, tage };
+}
+
+// Nach Ablaufdatum, das nächste zuerst (abgelaufene ganz oben); ohne Datum danach:
+// erst „noch eintragen“, dann „kein Ablauf“; sonst nach Name.
+function tokensSortieren(liste) {
+  const rang = (e) => (e.laeuft_nie_ab ? 2 : e.ablaufdatum ? 0 : 1);
+  return [...(liste || [])].sort((a, b) => rang(a) - rang(b) ||
+    String(a.ablaufdatum || "").localeCompare(String(b.ablaufdatum || "")) ||
+    String(a.name).localeCompare(String(b.name), "de"));
+}
+
+// Wie viele brauchen Aufmerksamkeit (abgelaufen oder bald)? Für die Zahl im Menü.
+function tokensWarnung(liste, heute = new Date()) {
+  return (liste || []).filter((e) => ["abgelaufen", "bald"].includes(tokenStatus(e, heute).art)).length;
+}
+
 // --- Zeitpläne (Ticket #138) -------------------------------------------------------------
 // Tabelle admin_zeitplaene (Migration 20261114170000_admin_zeitplaene.sql). Supabase (pg_cron)
 // startet fällige Workflows; hier nur Anzeige und Prüfung der Eingaben.
@@ -467,6 +540,7 @@ if (typeof module !== "undefined") {
     meldungZeilen, freigabePruefen,
     DASHBOARD_HOECHSTENS_SEITEN, ticketsZaehlen, projektFehler, versionAusPaket, kennzahl,
     anmeldungSchritt, adminErgebnis, ANMELDUNG_ABGELAUFEN,
-    ZEITPLAN_SPALTEN, zeitgesteuerteWorkflows, zeitplanPruefen, zeitplanFaellig, naechsterLauf, zeitplanText, fehlendeZeitplaene, laufStatusText
+    ZEITPLAN_SPALTEN, zeitgesteuerteWorkflows, zeitplanPruefen, zeitplanFaellig, naechsterLauf, zeitplanText, fehlendeZeitplaene, laufStatusText,
+    TOKEN_SPALTEN, TOKEN_FELDER, TOKEN_BALD_TAGE, TOKEN_WERT_MUSTER, tokenPruefen, tageBisAblauf, tokenStatus, tokensSortieren, tokensWarnung
   };
 }

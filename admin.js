@@ -232,6 +232,7 @@ async function anmeldungAnzeigen(sitzung) {
   meldungenLaden();
   diensteLaden();
   testerLaden();
+  tokensLaden();
   zeitplaeneLaden();
   dashboardSupabaseLaden();
   githubVerbinden();
@@ -241,6 +242,105 @@ client.auth.onAuthStateChange(function (ereignis, sitzung) {
   // Nicht direkt im Rückruf auf Supabase warten (sonst kann die Bibliothek hängen bleiben).
   setTimeout(() => anmeldungVerarbeiten(sitzung), 0);
 });
+
+// --- Token-Übersicht (Ticket #158) -------------------------------------------------------
+// Tabelle admin_tokens in Supabase (nur Admins). Nur Angaben, nie Token-Werte.
+
+let tokens = [];
+let tokenInBearbeitung = null;
+
+async function tokensLaden() {
+  const liste = $("tokens-liste");
+  liste.replaceChildren(element("p", { klasse: "hinweis", text: "Lädt …" }));
+  const { data, error } = await client.from("admin_tokens").select(TOKEN_SPALTEN);
+  if (error) {
+    liste.replaceChildren(element("p", { klasse: "warnung", text: "Token-Übersicht konnte nicht geladen werden: " + error.message }));
+    return;
+  }
+  tokens = tokensSortieren(data);
+  zaehlerSetzen("tokens", tokensWarnung(tokens));
+  if (tokens.length === 0) {
+    liste.replaceChildren(element("p", { klasse: "hinweis", text: "Noch keine Tokens eingetragen." }));
+    return;
+  }
+  liste.replaceChildren(...tokens.map(tokenAnzeigen));
+}
+
+function tokenAnzeigen(eintrag) {
+  const status = tokenStatus(eintrag);
+  const daten = element("dl");
+  for (const [name, wert] of [["Wofür", eintrag.zweck], ["Wo hinterlegt", eintrag.speicherort],
+    ["Wer nutzt es", eintrag.konsumenten], ["Hinweis", eintrag.hinweis]]) {
+    if (wert) daten.append(element("dt", { text: name }), element("dd", { text: wert }));
+  }
+  return element("article", { klasse: "eintrag token", "data-token": String(eintrag.id), "data-ablauf": status.art },
+    element("h3", { text: eintrag.name }),
+    element("p", { klasse: "ablauf", text: (status.art === "abgelaufen" || status.art === "bald" ? "⚠️ " : "") + status.text }),
+    daten,
+    element("div", { klasse: "knoepfe" },
+      element("button", { klasse: "knopf knopf-leise", type: "button", text: "Bearbeiten",
+        onclick: () => tokenFormularOeffnen(eintrag) }),
+      element("button", { klasse: "knopf knopf-leise knopf-warnung", type: "button", text: "Löschen",
+        onclick: (e) => tokenLoeschen(eintrag, e.currentTarget) })));
+}
+
+function tokenFehlerZeigen(fehler) {
+  for (const feld of document.querySelectorAll("#token-formular [data-fehler]")) {
+    const text = fehler[feld.dataset.fehler] || "";
+    feld.textContent = text;
+    feld.hidden = !text;
+  }
+}
+
+function tokenFormularOeffnen(eintrag = null) {
+  const formular = $("token-formular");
+  tokenInBearbeitung = eintrag;
+  $("token-formular-titel").textContent = eintrag ? "„" + eintrag.name + "“ bearbeiten" : "Token hinzufügen";
+  for (const feld of Object.keys(TOKEN_FELDER)) formular.elements[feld].value = (eintrag && eintrag[feld]) || "";
+  formular.elements.ablaufdatum.value = (eintrag && eintrag.ablaufdatum) || "";
+  formular.elements.laeuft_nie_ab.checked = Boolean(eintrag && eintrag.laeuft_nie_ab);
+  tokenFehlerZeigen({});
+  formular.hidden = false;
+  formular.elements.name.focus();
+}
+
+function tokenFormularSchliessen() {
+  $("token-formular").hidden = true;
+  tokenInBearbeitung = null;
+}
+
+$("token-neu").addEventListener("click", () => tokenFormularOeffnen());
+$("token-abbrechen").addEventListener("click", tokenFormularSchliessen);
+
+$("token-formular").addEventListener("submit", async function (ereignis) {
+  ereignis.preventDefault();
+  const eingabe = Object.fromEntries(Object.keys(TOKEN_FELDER).map((feld) => [feld, this.elements[feld].value]));
+  eingabe.ablaufdatum = this.elements.ablaufdatum.value;
+  eingabe.laeuft_nie_ab = this.elements.laeuft_nie_ab.checked;
+  const { werte, fehler } = tokenPruefen(eingabe);
+  tokenFehlerZeigen(fehler);
+  if (Object.keys(fehler).length > 0) return;
+  await beschaeftigt(this.querySelector("button[type=submit]"), async () => {
+    const anfrage = tokenInBearbeitung
+      ? client.from("admin_tokens").update({ ...werte, geaendert_am: new Date().toISOString() }).eq("id", tokenInBearbeitung.id)
+      : client.from("admin_tokens").insert(werte);
+    const { error } = await anfrage;
+    if (error) return statusZeigen("Nicht gespeichert: " + error.message, true);
+    statusZeigen("„" + werte.name + "“ gespeichert.");
+    tokenFormularSchliessen();
+    tokensLaden();
+  });
+});
+
+async function tokenLoeschen(eintrag, knopf) {
+  if (!window.confirm("„" + eintrag.name + "“ wirklich aus der Token-Übersicht löschen?")) return;
+  await beschaeftigt(knopf, async () => {
+    const { error } = await client.from("admin_tokens").delete().eq("id", eintrag.id);
+    if (error) return statusZeigen("Nicht gelöscht: " + error.message, true);
+    statusZeigen("„" + eintrag.name + "“ gelöscht.");
+    tokensLaden();
+  });
+}
 
 // --- Zeitpläne (Ticket #138) -------------------------------------------------------------
 // Tabelle admin_zeitplaene in Supabase (nur Admins). Supabase (pg_cron) startet fällige
